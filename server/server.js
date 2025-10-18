@@ -37,30 +37,8 @@ app.use(helmet({
 }));
 
 // CORS configuration
-const allowedOrigins = [
-  process.env.FRONTEND_URL,
-  process.env.CLIENT_URL,
-  'http://localhost:5173',
-  'http://localhost:5000',
-  'http://localhost:3000'
-].filter(Boolean);
-
 app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    // In production with single deployment, allow same origin
-    if (process.env.NODE_ENV === 'production' && !process.env.FRONTEND_URL) {
-      return callback(null, true);
-    }
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: process.env.CLIENT_URL || 'http://localhost:5173',
   credentials: true,
   optionsSuccessStatus: 200,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -112,27 +90,14 @@ app.use('/api/qrcodes', qrcodesRoutes);
 app.use('/api/alerts', alertsRoutes);
 app.use('/api/sync', syncRoutes);
 
-// Serve static files from React app in production
-if (process.env.NODE_ENV === 'production') {
-  const clientBuildPath = join(__dirname, '../client/dist');
-  
-  // Serve static files
-  app.use(express.static(clientBuildPath));
-  
-  // Handle React routing - send all non-API requests to index.html
-  app.get('*', (req, res) => {
-    res.sendFile(join(clientBuildPath, 'index.html'));
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'API endpoint not found',
+    path: req.originalUrl
   });
-} else {
-  // 404 handler for development (API only)
-  app.use('*', (req, res) => {
-    res.status(404).json({
-      success: false,
-      message: 'API endpoint not found',
-      path: req.originalUrl
-    });
-  });
-}
+});
 
 // Global error handler
 app.use(errorHandler);
