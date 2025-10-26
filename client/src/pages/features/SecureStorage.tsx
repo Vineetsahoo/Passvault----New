@@ -6,6 +6,8 @@ import {
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../../components/Navbar'; // Import Navbar
 import Footer from '../../components/Footer'; // Import Footer
+import storageService from '../../services/storageService';
+import backupService from '../../services/backupService';
 
 interface FeatureTemplateProps {
   title: string;
@@ -135,9 +137,9 @@ const AuthPrompt = () => {
 const SecureStorage = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [metrics, setMetrics] = useState<StorageMetrics>({
-    totalStorage: '10 GB',
-    usedStorage: '2.5 GB',
-    encryptedFiles: 156,
+    totalStorage: '0 GB',
+    usedStorage: '0 B',
+    encryptedFiles: 0,
     lastBackup: new Date()
   });
 
@@ -149,36 +151,126 @@ const SecureStorage = () => {
   });
 
   const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(true);
   const [showAuditLog, setShowAuditLog] = useState(false);
   const [auditLog, setAuditLog] = useState<SecurityAudit[]>([]);
   const [backupStatus, setBackupStatus] = useState<BackupStatus>({
     lastBackup: new Date(),
     nextScheduled: new Date(Date.now() + 86400000),
-    backupSize: '1.8 GB',
+    backupSize: '0 B',
     location: 'Cloud Storage'
   });
   const [showRecoveryKey, setShowRecoveryKey] = useState(false);
-  const recoveryKey = 'XXXX-YYYY-ZZZZ-AAAA';
+  const [recoveryKey, setRecoveryKey] = useState('XXXX-YYYY-ZZZZ-AAAA');
 
   useEffect(() => {
-    // Simulate checking authentication status
-    const checkAuth = async () => {
-      // Replace this with your actual auth check
-      const authStatus = localStorage.getItem('isAuthenticated') === 'true';
+    const checkAuthAndLoadData = async () => {
+      // Check auth status
+      const token = localStorage.getItem('accessToken');
+      const authStatus = !!token;
       setIsAuthenticated(authStatus);
+      
       if (authStatus) {
-        // Only fetch security status if authenticated
         try {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          setDataLoading(true);
+          
+          // Fetch storage metrics
+          const storageMetricsResponse = await storageService.getStorageMetrics();
+          const storageMetrics = storageMetricsResponse.metrics || storageMetricsResponse;
+          
+          // Format storage metrics
+          const formatBytes = (bytes: number) => {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return (bytes / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
+          };
+          
+          setMetrics({
+            totalStorage: '10 GB', // Fixed limit
+            usedStorage: formatBytes(storageMetrics.totalSize || storageMetrics.usedStorageBytes || 0),
+            encryptedFiles: storageMetrics.totalItems || storageMetrics.encryptedFiles || 0,
+            lastBackup: new Date()
+          });
+          
+          // Fetch security status
+          const secStatusResponse = await storageService.getSecurityStatus();
+          const secStatus = secStatusResponse.status || secStatusResponse;
+          
+          setSecurityStatus({
+            status: (secStatus.overallStatus || secStatus.status || 'secure') as 'secure' | 'warning' | 'critical',
+            lastScan: new Date(secStatus.lastSecurityScan || secStatus.lastScan || Date.now()),
+            encryptionType: secStatus.encryptionType || 'AES-256',
+            twoFactorEnabled: secStatus.twoFactorEnabled || false
+          });
+          
+          // Fetch backup stats
+          const backupStats = await backupService.getBackupStats();
+          
+          if (backupStats.recentBackups && backupStats.recentBackups.length > 0) {
+            const lastBackupData = backupStats.recentBackups[0];
+            setBackupStatus({
+              lastBackup: new Date(lastBackupData.createdAt),
+              nextScheduled: new Date(Date.now() + 86400000), // 24 hours from now
+              backupSize: formatBytes(lastBackupData.backupSize || 0),
+              location: lastBackupData.location || 'Cloud Storage'
+            });
+            
+            setMetrics(prev => ({
+              ...prev,
+              lastBackup: new Date(lastBackupData.createdAt)
+            }));
+          }
+          
+          // Fetch recovery key
+          try {
+            const keyResponse = await storageService.getRecoveryKey();
+            setRecoveryKey(keyResponse.recoveryKey || 'XXXX-YYYY-ZZZZ-AAAA');
+          } catch (keyErr) {
+            console.log('Recovery key not available:', keyErr);
+            setRecoveryKey('XXXX-YYYY-ZZZZ-AAAA');
+          }
+          
           setLoading(false);
-        } catch (err) {
+          setDataLoading(false);
+        } catch (err: any) {
           console.error('Failed to fetch security status:', err);
+          setLoading(false);
+          setDataLoading(false);
         }
+      } else {
+        setLoading(false);
+        setDataLoading(false);
       }
     };
 
-    checkAuth();
+    checkAuthAndLoadData();
   }, []);
+
+  const handleToggleAuditLog = async () => {
+    if (!showAuditLog && auditLog.length === 0) {
+      // Fetch audit log when opening for the first time
+      try {
+        const auditResponse = await storageService.getSecurityAuditLog(20);
+        
+        // Map audit log to component format
+        const mappedAuditLog: SecurityAudit[] = auditResponse.auditLog.map((entry: any) => ({
+          id: entry.syncLogId,
+          timestamp: new Date(entry.timestamp),
+          action: entry.action,
+          ipAddress: entry.deviceInfo?.ipAddress || 'Unknown',
+          location: entry.deviceInfo?.location || 'Unknown',
+          status: entry.status || 'success'
+        }));
+        
+        setAuditLog(mappedAuditLog);
+      } catch (err) {
+        console.error('Failed to load audit log:', err);
+      }
+    }
+    setShowAuditLog(!showAuditLog);
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -448,7 +540,7 @@ const SecureStorage = () => {
                   Security Audit Log
                 </h3>
                 <button
-                  onClick={() => setShowAuditLog(!showAuditLog)}
+                  onClick={handleToggleAuditLog}
                   className={`px-3 py-1 rounded-lg text-sm transition-colors ${
                     showAuditLog 
                       ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200' 
@@ -461,37 +553,40 @@ const SecureStorage = () => {
               {showAuditLog && (
                 <div className="p-6">
                   <div className="max-h-72 overflow-y-auto space-y-3">
-                    {[
-                      { timestamp: new Date(), action: 'Security scan completed', ipAddress: '192.168.1.1', location: 'New York, US', status: 'success' },
-                      { timestamp: new Date(Date.now() - 3600000), action: 'Backup created', ipAddress: '192.168.1.1', location: 'New York, US', status: 'success' },
-                      { timestamp: new Date(Date.now() - 7200000), action: 'Failed login attempt', ipAddress: '10.0.0.1', location: 'London, UK', status: 'failed' }
-                    ].map((log, index) => (
-                      <div key={index} className={`bg-white rounded-lg p-4 shadow-sm border ${
-                        log.status === 'success' ? 'border-emerald-200' : 'border-rose-200'
-                      }`}>
-                        <div className="flex items-start gap-3">
-                          <div className={`p-1.5 rounded-full ${
-                            log.status === 'success' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'
-                          }`}>
-                            {log.status === 'success' ? <CheckCircle2 className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex justify-between items-center">
-                              <p className="font-medium text-slate-800">{log.action}</p>
-                              <span className={`text-xs px-2 py-1 rounded-full ${
-                                log.status === 'success' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
-                              }`}>
-                                {log.status}
-                              </span>
+                    {auditLog.length === 0 ? (
+                      <div className="text-center py-8 text-slate-500">
+                        <History className="h-12 w-12 mx-auto mb-3 text-slate-300" />
+                        <p>No audit log entries found</p>
+                      </div>
+                    ) : (
+                      auditLog.map((log) => (
+                        <div key={log.id} className={`bg-white rounded-lg p-4 shadow-sm border ${
+                          log.status === 'success' ? 'border-emerald-200' : 'border-rose-200'
+                        }`}>
+                          <div className="flex items-start gap-3">
+                            <div className={`p-1.5 rounded-full ${
+                              log.status === 'success' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'
+                            }`}>
+                              {log.status === 'success' ? <CheckCircle2 className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}
                             </div>
-                            <div className="flex justify-between items-center mt-2 text-sm text-slate-500">
-                              <span>{log.timestamp.toLocaleString()}</span>
-                              <span>{log.ipAddress} ({log.location})</span>
+                            <div className="flex-1">
+                              <div className="flex justify-between items-center">
+                                <p className="font-medium text-slate-800">{log.action}</p>
+                                <span className={`text-xs px-2 py-1 rounded-full ${
+                                  log.status === 'success' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                                }`}>
+                                  {log.status}
+                                </span>
+                              </div>
+                              <div className="flex justify-between items-center mt-2 text-sm text-slate-500">
+                                <span>{log.timestamp.toLocaleString()}</span>
+                                <span>{log.ipAddress} ({log.location})</span>
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                 </div>
               )}

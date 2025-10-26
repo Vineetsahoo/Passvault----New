@@ -28,7 +28,7 @@ router.post('/initiate', authenticateToken, async (req, res) => {
     // Verify device belongs to user
     const device = await Device.findOne({
       _id: deviceId,
-      userId: req.user.id
+      userId: req.user.userId
     });
 
     if (!device) {
@@ -47,7 +47,7 @@ router.post('/initiate', authenticateToken, async (req, res) => {
 
     // Check if there's already an active sync for this device
     const activeSyncLog = await SyncLog.findOne({
-      userId: req.user.id,
+      userId: req.user.userId,
       deviceId: deviceId,
       syncStatus: { $in: ['initiated', 'in_progress'] }
     });
@@ -62,7 +62,7 @@ router.post('/initiate', authenticateToken, async (req, res) => {
 
     // Create new sync log
     const syncLog = new SyncLog({
-      userId: req.user.id,
+      userId: req.user.userId,
       deviceId: deviceId,
       syncType,
       syncStatus: 'initiated',
@@ -82,7 +82,7 @@ router.post('/initiate', authenticateToken, async (req, res) => {
     logger.info(`Sync initiated: ${syncLog._id} for device ${deviceId}`);
 
     // Simulate async sync process
-    performSync(syncLog._id, deviceId, dataTypes, req.user.id);
+    performSync(syncLog._id, deviceId, dataTypes, req.user.userId);
 
     res.status(201).json({
       success: true,
@@ -113,7 +113,7 @@ router.get('/status/:syncLogId', authenticateToken, async (req, res) => {
   try {
     const syncLog = await SyncLog.findOne({
       _id: req.params.syncLogId,
-      userId: req.user.id
+      userId: req.user.userId
     }).populate('deviceId', 'deviceName deviceType');
 
     if (!syncLog) {
@@ -152,7 +152,7 @@ router.get('/history', authenticateToken, async (req, res) => {
       limit = 20
     } = req.query;
 
-    const query = { userId: req.user.id };
+    const query = { userId: req.user.userId };
 
     if (deviceId) query.deviceId = deviceId;
     if (syncType) query.syncType = syncType;
@@ -194,7 +194,7 @@ router.get('/recent', authenticateToken, async (req, res) => {
   try {
     const { limit = 10 } = req.query;
 
-    const syncLogs = await SyncLog.getRecentSyncs(req.user.id, parseInt(limit));
+    const syncLogs = await SyncLog.getRecentSyncs(req.user.userId, parseInt(limit));
 
     res.json({
       success: true,
@@ -217,7 +217,7 @@ router.get('/recent', authenticateToken, async (req, res) => {
 router.get('/conflicts', authenticateToken, async (req, res) => {
   try {
     const syncLogs = await SyncLog.find({
-      userId: req.user.id,
+      userId: req.user.userId,
       'conflicts.0': { $exists: true },
       'conflicts.resolution': { $exists: false }
     })
@@ -270,7 +270,7 @@ router.put('/resolve-conflict/:syncLogId', authenticateToken, async (req, res) =
 
     const syncLog = await SyncLog.findOne({
       _id: req.params.syncLogId,
-      userId: req.user.id
+      userId: req.user.userId
     });
 
     if (!syncLog) {
@@ -318,7 +318,7 @@ router.put('/resolve-conflict/:syncLogId', authenticateToken, async (req, res) =
 router.get('/stats/overview', authenticateToken, async (req, res) => {
   try {
     const stats = await SyncLog.aggregate([
-      { $match: { userId: req.user.id } },
+      { $match: { userId: req.user.userId } },
       {
         $facet: {
           totalStats: [
@@ -436,7 +436,7 @@ router.post('/cancel/:syncLogId', authenticateToken, async (req, res) => {
   try {
     const syncLog = await SyncLog.findOne({
       _id: req.params.syncLogId,
-      userId: req.user.id,
+      userId: req.user.userId,
       syncStatus: { $in: ['initiated', 'in_progress'] }
     });
 
@@ -481,7 +481,7 @@ router.post('/cancel/:syncLogId', authenticateToken, async (req, res) => {
 router.get('/settings', authenticateToken, async (req, res) => {
   try {
     const devices = await Device.find({
-      userId: req.user.id
+      userId: req.user.userId
     })
       .select('deviceName deviceType syncEnabled autoSyncEnabled syncSettings')
       .lean();
@@ -510,7 +510,7 @@ router.put('/settings/:deviceId', authenticateToken, async (req, res) => {
 
     const device = await Device.findOne({
       _id: req.params.deviceId,
-      userId: req.user.id
+      userId: req.user.userId
     });
 
     if (!device) {
@@ -596,6 +596,51 @@ async function performSync(syncLogId, deviceId, dataTypes, userId) {
 
     logger.info(`Sync completed: ${syncLogId}`);
 
+    // Create notification for sync completion
+    try {
+      const User = (await import('../models/User.js')).default;
+      const user = await User.findById(userId);
+      if (user) {
+        if (!user.profile) user.profile = {};
+        if (!user.profile.notifications) user.profile.notifications = [];
+        
+        const formatDataSize = (bytes) => {
+          if (bytes < 1024) return `${bytes} B`;
+          const kb = bytes / 1024;
+          if (kb < 1024) return `${kb.toFixed(2)} KB`;
+          const mb = kb / 1024;
+          if (mb < 1024) return `${mb.toFixed(2)} MB`;
+          return `${(mb / 1024).toFixed(2)} GB`;
+        };
+        
+        user.profile.notifications.push({
+          title: 'Sync Completed',
+          message: `Successfully synced ${totalItems} items (${formatDataSize(dataSynced)}) across your devices.`,
+          type: 'success',
+          category: 'sync',
+          priority: 'low',
+          isRead: false,
+          action: {
+            type: 'internal',
+            label: 'View Sync History',
+            link: '/features/sync'
+          },
+          metadata: {
+            resourceType: 'sync',
+            resourceId: syncLogId.toString(),
+            itemCount: totalItems,
+            dataSize: dataSynced
+          },
+          createdAt: new Date()
+        });
+        
+        await user.save();
+        logger.info(`Notification created for sync completion: ${syncLogId}`);
+      }
+    } catch (notifError) {
+      logger.error('Failed to create sync completion notification:', notifError);
+    }
+
   } catch (error) {
     logger.error(`Sync failed: ${syncLogId}`, error);
     
@@ -612,6 +657,41 @@ async function performSync(syncLogId, deviceId, dataTypes, userId) {
     const device = await Device.findById(deviceId);
     if (device) {
       await device.updateSyncStatus('offline');
+    }
+
+    // Create notification for sync failure
+    try {
+      const User = (await import('../models/User.js')).default;
+      const user = await User.findById(userId);
+      if (user) {
+        if (!user.profile) user.profile = {};
+        if (!user.profile.notifications) user.profile.notifications = [];
+        
+        user.profile.notifications.push({
+          title: 'Sync Failed',
+          message: `Unable to sync your data: ${error.message}`,
+          type: 'alert',
+          category: 'sync',
+          priority: 'high',
+          isRead: false,
+          action: {
+            type: 'internal',
+            label: 'Retry Sync',
+            link: '/features/sync'
+          },
+          metadata: {
+            resourceType: 'sync',
+            resourceId: syncLogId.toString(),
+            error: error.message
+          },
+          createdAt: new Date()
+        });
+        
+        await user.save();
+        logger.info(`Notification created for sync failure: ${syncLogId}`);
+      }
+    } catch (notifError) {
+      logger.error('Failed to create sync failure notification:', notifError);
     }
   }
 }

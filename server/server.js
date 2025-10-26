@@ -17,6 +17,8 @@ import devicesRoutes from './routes/devices.js';
 import qrcodesRoutes from './routes/qrcodes.js';
 import alertsRoutes from './routes/alerts.js';
 import syncRoutes from './routes/sync.js';
+import backupsRoutes from './routes/backups.js';
+import storageRoutes from './routes/storage.js';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler.js';
@@ -45,16 +47,20 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'x-csrf-token']
 }));
 
-// Rate limiting
+// Rate limiting - More lenient for development
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 1000, // limit each IP to 1000 requests per windowMs (increased for multiple API calls)
   message: {
     error: 'Too many requests from this IP, please try again later.',
     retryAfter: Math.ceil((parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000) / 1000)
   },
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => {
+    // Skip rate limiting in development mode
+    return process.env.NODE_ENV === 'development';
+  }
 });
 
 app.use('/api/', limiter);
@@ -89,6 +95,8 @@ app.use('/api/devices', devicesRoutes);
 app.use('/api/qrcodes', qrcodesRoutes);
 app.use('/api/alerts', alertsRoutes);
 app.use('/api/sync', syncRoutes);
+app.use('/api/backups', backupsRoutes);
+app.use('/api/storage', storageRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {

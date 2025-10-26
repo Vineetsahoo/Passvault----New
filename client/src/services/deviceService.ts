@@ -1,4 +1,5 @@
 import api from './api';
+import notificationService from './notificationService';
 
 export interface Device {
   _id: string;
@@ -30,6 +31,9 @@ export interface Device {
   };
   isTrusted: boolean;
   isPrimary: boolean;
+  isVerified: boolean;
+  verifiedAt?: Date;
+  verificationMethod?: 'email' | 'manual' | 'qr' | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -64,9 +68,10 @@ export interface DeviceStats {
 }
 
 const deviceService = {
-  // Register new device
+  // Register device
   async registerDevice(data: RegisterDeviceData): Promise<Device> {
     const response = await api.post('/devices/register', data);
+    // Notification is created by backend
     return response.data.device;
   },
 
@@ -117,8 +122,9 @@ const deviceService = {
   },
 
   // Delete device
-  async deleteDevice(id: string): Promise<void> {
+  async deleteDevice(id: string, deviceName?: string): Promise<void> {
     await api.delete(`/devices/${id}`);
+    // Notification is created by backend
   },
 
   // Trigger device sync
@@ -179,6 +185,37 @@ const deviceService = {
       browser,
       deviceName: `${browser} on ${operatingSystem}`,
     };
+  },
+
+  // Send verification code to email
+  async sendVerificationCode(deviceId: string): Promise<{
+    success: boolean;
+    message: string;
+    expiresIn: string;
+  }> {
+    const response = await api.post(`/devices/${deviceId}/send-verification`);
+    return response.data;
+  },
+
+  // Verify device with code
+  async verifyDevice(deviceId: string, code: string, deviceName?: string): Promise<{
+    success: boolean;
+    message: string;
+    device?: any;
+  }> {
+    const response = await api.post(`/devices/${deviceId}/verify`, { code });
+    // Notification is created by backend
+    return response.data;
+  },
+
+  // Resend verification code
+  async resendVerificationCode(deviceId: string): Promise<{
+    success: boolean;
+    message: string;
+    expiresIn: string;
+  }> {
+    const response = await api.post(`/devices/${deviceId}/resend-verification`);
+    return response.data;
   },
 };
 

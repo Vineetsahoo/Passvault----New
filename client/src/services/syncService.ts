@@ -1,4 +1,5 @@
 import api from './api';
+import notificationService from './notificationService';
 
 export type SyncType = 'manual' | 'auto' | 'scheduled' | 'forced';
 export type SyncStatus = 'initiated' | 'in_progress' | 'completed' | 'failed' | 'partial';
@@ -289,6 +290,18 @@ const syncService = {
       forced: 'Forced',
     };
     return labels[type] || type;
+  },
+
+  // Helper: Send sync completion notification (handled by backend now)
+  async notifySyncCompleted(syncLog: SyncLog): Promise<void> {
+    // Notification is created by backend
+    console.log('Sync completed - notification handled by backend');
+  },
+
+  // Helper: Send sync failure notification (handled by backend now)
+  async notifySyncFailed(error: string): Promise<void> {
+    // Notification is created by backend
+    console.log('Sync failed - notification handled by backend');
   },
 };
 

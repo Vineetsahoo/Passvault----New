@@ -6,6 +6,8 @@ import {
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
+import syncService from '../../services/syncService';
+import deviceService from '../../services/deviceService';
 
 interface SyncDevice {
   id: string;
@@ -114,17 +116,19 @@ const AuthPrompt = () => {
 const Sync = () => {
   const navigate = useNavigate();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [dataLoading, setDataLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [devices, setDevices] = useState<SyncDevice[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [syncStats, setSyncStats] = useState<SyncStats>({
-    totalSyncs: 156,
-    lastWeekSyncs: 23,
-    dataTransferred: '1.2 GB',
-    syncSuccess: 98
+    totalSyncs: 0,
+    lastWeekSyncs: 0,
+    dataTransferred: '0 B',
+    syncSuccess: 0
   });
+  const [syncHistory, setSyncHistory] = useState<SyncHistory[]>([]);
 
   const getDeviceIcon = (type: string) => {
     switch (type) {
@@ -138,36 +142,189 @@ const Sync = () => {
   const handleManualSync = async () => {
     setIsSyncing(true);
     setError(null);
+    
     try {
-      // Simulate sync process
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      setLastSync(new Date());
+      // Get all devices and trigger sync for each
+      const devicesResponse = await deviceService.getDevices();
+      
+      if (devicesResponse.devices.length === 0) {
+        setError('No devices found to sync');
+        setIsSyncing(false);
+        return;
+      }
+      
+      // Use the first device or current device for sync
+      const primaryDevice = devicesResponse.devices.find((d: any) => d.isPrimary) || devicesResponse.devices[0];
+      
+      // Initiate sync
+      const syncResponse = await syncService.initiateSync({
+        deviceId: primaryDevice._id,
+        syncType: 'manual',
+        dataTypes: ['passwords', 'documents', 'settings', 'notes', 'qrcodes']
+      });
+      
+      // Update devices to syncing status
       setDevices(prev => 
-        prev.map(device => ({ ...device, status: 'synced', lastSynced: new Date() }))
+        prev.map(device => ({ ...device, status: 'syncing' }))
       );
-    } catch (err) {
-      setError('Sync failed. Please try again.');
-    } finally {
+      
+      // Poll for sync completion
+      const syncLogId = syncResponse.syncLog.id;
+      let pollCount = 0;
+      const maxPolls = 30; // Max 30 seconds
+      
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusResponse = await syncService.getSyncStatus(syncLogId);
+          
+          if (statusResponse.syncStatus === 'completed') {
+            clearInterval(pollInterval);
+            setLastSync(new Date(statusResponse.completedAt!));
+            
+            // Send notification
+            await syncService.notifySyncCompleted(statusResponse);
+            
+            // Update all devices to synced
+            setDevices(prev => 
+              prev.map(device => ({ ...device, status: 'synced', lastSynced: new Date() }))
+            );
+            
+            // Refresh sync stats
+            const stats = await syncService.getSyncStats();
+            const successRate = stats.totalSyncs > 0 
+              ? Math.round((stats.completedSyncs / stats.totalSyncs) * 100)
+              : 0;
+            
+            setSyncStats(prev => ({
+              ...prev,
+              totalSyncs: stats.totalSyncs,
+              dataTransferred: syncService.formatDataSize(stats.totalDataSynced || 0),
+              syncSuccess: successRate
+            }));
+            
+            // Refresh sync history
+            const recentSyncs = await syncService.getRecentSyncs(5);
+            const mappedHistory: SyncHistory[] = recentSyncs.map((sync: any) => ({
+              id: sync._id,
+              timestamp: new Date(sync.completedAt || sync.startedAt),
+              status: sync.syncStatus === 'completed' ? 'success' : 'failed',
+              details: sync.syncStatus === 'completed' 
+                ? `Synced ${sync.totalItems || 0} items (${syncService.formatDataSize(sync.dataSynced || 0)})`
+                : sync.error?.message || 'Sync failed'
+            }));
+            setSyncHistory(mappedHistory);
+            
+            setIsSyncing(false);
+          } else if (statusResponse.syncStatus === 'failed') {
+            clearInterval(pollInterval);
+            const errorMsg = statusResponse.error?.message || 'Sync failed. Please try again.';
+            setError(errorMsg);
+            
+            // Send failure notification
+            await syncService.notifySyncFailed(errorMsg);
+            
+            setDevices(prev => 
+              prev.map(device => ({ ...device, status: 'error' }))
+            );
+            setIsSyncing(false);
+          }
+          
+          pollCount++;
+          if (pollCount >= maxPolls) {
+            clearInterval(pollInterval);
+            setError('Sync timed out. Please try again.');
+            setIsSyncing(false);
+          }
+        } catch (pollErr) {
+          console.error('Error polling sync status:', pollErr);
+        }
+      }, 1000);
+      
+    } catch (err: any) {
+      console.error('Failed to initiate sync:', err);
+      setError(err.response?.data?.message || 'Sync failed. Please try again.');
       setIsSyncing(false);
+      
+      // Revert devices to previous status
+      setDevices(prev => 
+        prev.map(device => ({ ...device, status: 'synced' }))
+      );
     }
   };
 
   useEffect(() => {
     const checkAuthAndLoadDevices = async () => {
-      // Simulate auth check
-      const authStatus = localStorage.getItem('isAuthenticated') === 'true';
+      // Check auth status
+      const token = localStorage.getItem('accessToken');
+      const authStatus = !!token;
       setIsAuthenticated(authStatus);
       
       if (authStatus) {
-        // Only fetch devices if authenticated
-        const fetchDevices = async () => {
-          setDevices([
-            { id: '1', name: 'iPhone 13', type: 'mobile', lastSynced: new Date(), status: 'synced' },
-            { id: '2', name: 'MacBook Pro', type: 'laptop', lastSynced: new Date(), status: 'synced' },
-            { id: '3', name: 'Office PC', type: 'desktop', lastSynced: new Date(), status: 'synced' }
-          ]);
-        };
-        fetchDevices();
+        try {
+          setDataLoading(true);
+          
+          // Fetch devices from API
+          const devicesResponse = await deviceService.getDevices();
+          
+          // Map devices to sync format
+          const mappedDevices: SyncDevice[] = devicesResponse.devices.map((device: any) => ({
+            id: device._id,
+            name: device.deviceName,
+            type: device.deviceType === 'smartphone' ? 'mobile' : (device.deviceType === 'desktop' || device.deviceType === 'laptop' ? device.deviceType : 'desktop'),
+            lastSynced: device.lastSyncedAt ? new Date(device.lastSyncedAt) : new Date(),
+            status: device.status === 'syncing' ? 'syncing' : (device.lastSyncedAt ? 'synced' : 'error')
+          }));
+          
+          setDevices(mappedDevices);
+          
+          // Fetch sync statistics
+          const stats = await syncService.getSyncStats();
+          
+          // Calculate success rate
+          const successRate = stats.totalSyncs > 0 
+            ? Math.round((stats.completedSyncs / stats.totalSyncs) * 100)
+            : 0;
+          
+          // Get recent syncs for last week calculation
+          const now = new Date();
+          const lastWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          const lastWeekSyncs = stats.recentSyncs?.filter((sync: any) => 
+            new Date(sync.startedAt) >= lastWeek
+          ).length || 0;
+          
+          setSyncStats({
+            totalSyncs: stats.totalSyncs,
+            lastWeekSyncs: lastWeekSyncs,
+            dataTransferred: syncService.formatDataSize(stats.totalDataSynced || 0),
+            syncSuccess: successRate
+          });
+          
+          // Set last sync time from most recent sync
+          if (stats.recentSyncs && stats.recentSyncs.length > 0) {
+            const mostRecent = stats.recentSyncs[0];
+            setLastSync(new Date(mostRecent.completedAt || mostRecent.startedAt));
+          }
+          
+          // Fetch recent sync history
+          const recentSyncs = await syncService.getRecentSyncs(5);
+          const mappedHistory: SyncHistory[] = recentSyncs.map((sync: any) => ({
+            id: sync._id,
+            timestamp: new Date(sync.completedAt || sync.startedAt),
+            status: sync.syncStatus === 'completed' ? 'success' : 'failed',
+            details: sync.syncStatus === 'completed' 
+              ? `Synced ${sync.totalItems || 0} items (${syncService.formatDataSize(sync.dataSynced || 0)})`
+              : sync.error?.message || 'Sync failed'
+          }));
+          setSyncHistory(mappedHistory);
+          
+          setDataLoading(false);
+        } catch (err: any) {
+          console.error('Failed to load sync data:', err);
+          setError(err.response?.data?.message || 'Failed to load sync data');
+          setDataLoading(false);
+        }
+      } else {
+        setDataLoading(false);
       }
     };
 
@@ -195,6 +352,13 @@ const Sync = () => {
 
         {!isAuthenticated ? (
           <AuthPrompt />
+        ) : dataLoading ? (
+          <div className="flex items-center justify-center py-20">
+            <div className="text-center">
+              <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-indigo-200 border-t-indigo-600 mb-4"></div>
+              <p className="text-gray-600">Loading sync data...</p>
+            </div>
+          </div>
         ) : (
           <div className="space-y-8">
             {error && (
@@ -406,35 +570,42 @@ const Sync = () => {
                 </h3>
               </div>
               <div className="divide-y divide-slate-200">
-                {[
-                  { id: '1', timestamp: new Date(), status: 'success', details: 'All devices synced successfully' },
-                  { id: '2', timestamp: new Date(Date.now() - 3600000), status: 'failed', details: 'Network timeout' }
-                ].map(activity => (
-                  <div key={activity.id} className="p-4 hover:bg-slate-50/80 transition-colors">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-full ${
-                          activity.status === 'success' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'
-                        }`}>
-                          {activity.status === 'success' ? <Check className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
-                        </div>
-                        <div>
-                          <div className="font-medium text-slate-800">{activity.details}</div>
-                          <div className="text-xs text-slate-500">
-                            {activity.timestamp.toLocaleString()}
+                {syncHistory.length === 0 ? (
+                  <div className="p-8 text-center">
+                    <div className="bg-slate-50 rounded-full p-4 w-16 h-16 flex items-center justify-center mx-auto mb-3">
+                      <Clock className="h-8 w-8 text-slate-400" />
+                    </div>
+                    <p className="text-slate-500 text-sm">No sync activity yet</p>
+                    <p className="text-slate-400 text-xs mt-1">Sync history will appear here</p>
+                  </div>
+                ) : (
+                  syncHistory.map(activity => (
+                    <div key={activity.id} className="p-4 hover:bg-slate-50/80 transition-colors">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className={`p-2 rounded-full ${
+                            activity.status === 'success' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'
+                          }`}>
+                            {activity.status === 'success' ? <Check className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+                          </div>
+                          <div>
+                            <div className="font-medium text-slate-800">{activity.details}</div>
+                            <div className="text-xs text-slate-500">
+                              {activity.timestamp.toLocaleString()}
+                            </div>
                           </div>
                         </div>
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                          activity.status === 'success' 
+                            ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' 
+                            : 'bg-rose-100 text-rose-700 border border-rose-200'
+                        }`}>
+                          {activity.status}
+                        </span>
                       </div>
-                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                        activity.status === 'success' 
-                          ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' 
-                          : 'bg-rose-100 text-rose-700 border border-rose-200'
-                      }`}>
-                        {activity.status}
-                      </span>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
           </div>

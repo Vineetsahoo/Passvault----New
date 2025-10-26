@@ -13,6 +13,14 @@ import {
 import { HiCloud, HiOutlineDownload, HiOutlineUpload } from "react-icons/hi";
 import { IoCloudDone, IoCloudOffline } from "react-icons/io5";
 
+// Import services - you'll need to create these service files
+import backupService from '../../services/backupService';
+import deviceService from '../../services/deviceService';
+import syncService from '../../services/syncService';
+import passwordService from '../../services/passwordService';
+import documentService from '../../services/documentService';
+import qrcodeService from '../../services/qrcodeService';
+
 interface SyncStatus {
   lastSync: string;
   status: 'success' | 'pending' | 'error';
@@ -90,9 +98,9 @@ interface BackupSettings {
 
 const BackUp: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({
-    lastSync: '2023-12-04 14:30',
-    status: 'success',
-    items: 156
+    lastSync: new Date().toISOString(),
+    status: 'pending',
+    items: 0
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -104,35 +112,11 @@ const BackUp: React.FC = () => {
   const [syncMode, setSyncMode] = useState<'auto' | 'manual'>('auto');
   const [encryptionEnabled, setEncryptionEnabled] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
+  const [dataLoading, setDataLoading] = useState(true);
 
-  const [devices] = useState<SyncDevice[]>([
-    { id: '1', name: 'MacBook Pro', type: 'laptop', lastSync: '2023-12-04 14:30', status: 'online' },
-    { id: '2', name: 'iPhone 13', type: 'mobile', lastSync: '2023-12-04 13:15', status: 'online' },
-    { id: '3', name: 'Office PC', type: 'desktop', lastSync: '2023-12-03 18:45', status: 'offline' }
-  ]);
-
-  const [syncHistory] = useState<SyncHistory[]>([
-    { id: '1', date: '2023-12-04 14:30', status: 'success', details: 'All items synced successfully' },
-    { id: '2', date: '2023-12-03 18:45', status: 'error', details: 'Network connection failed' },
-    { id: '3', date: '2023-12-03 12:30', status: 'success', details: 'Manual sync completed' }
-  ]);
-
-  const [backupVersions, setBackupVersions] = useState<BackupVersion[]>([
-    {
-      id: 'v1',
-      timestamp: '2023-12-04 14:30',
-      size: '256 MB',
-      type: 'auto',
-      restorable: true
-    },
-    {
-      id: 'v2',
-      timestamp: '2023-12-03 12:00',
-      size: '254 MB',
-      type: 'manual',
-      restorable: true
-    }
-  ]);
+  const [devices, setDevices] = useState<SyncDevice[]>([]);
+  const [syncHistory, setSyncHistory] = useState<SyncHistory[]>([]);
+  const [backupVersions, setBackupVersions] = useState<BackupVersion[]>([]);
 
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus>({
     inProgress: false,
@@ -148,6 +132,186 @@ const BackUp: React.FC = () => {
     compression: true,
     location: 'cloud'
   });
+
+  // New feature states
+  const [healthScore, setHealthScore] = useState<any>(null);
+  const [showSelectiveBackup, setShowSelectiveBackup] = useState(false);
+  const [showDeviceSelector, setShowDeviceSelector] = useState(false);
+  const [selectedBackupDevice, setSelectedBackupDevice] = useState<string>('');
+  const [availableDevices, setAvailableDevices] = useState<any[]>([]);
+  const [selectedItems, setSelectedItems] = useState({
+    passwordIds: [] as string[],
+    documentIds: [] as string[],
+    qrcodeIds: [] as string[]
+  });
+  const [selectablePasswords, setSelectablePasswords] = useState<any[]>([]);
+  const [selectableDocuments, setSelectableDocuments] = useState<any[]>([]);
+  const [selectableQRCodes, setSelectableQRCodes] = useState<any[]>([]);
+
+  // Fetch all data on component mount
+  useEffect(() => {
+    const fetchAllData = async () => {
+      try {
+        setDataLoading(true);
+        setError(null);
+
+        // Add small delay between requests to avoid rate limiting
+        const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+        // Fetch backup versions
+        const backupsResponse = await backupService.getBackupVersions();
+        if (backupsResponse.success && backupsResponse.backups) {
+          const formattedBackups = backupsResponse.backups.map((backup: any) => ({
+            id: backup._id,
+            timestamp: new Date(backup.createdAt).toLocaleString(),
+            size: formatBytes(backup.backupSize || 0),
+            type: backup.backupType,
+            restorable: backup.restorable && backup.backupStatus === 'completed'
+          }));
+          setBackupVersions(formattedBackups);
+
+          // Update sync status from latest backup
+          if (formattedBackups.length > 0) {
+            const latestBackup = backupsResponse.backups[0];
+            setSyncStatus({
+              lastSync: new Date(latestBackup.completedAt || latestBackup.createdAt).toLocaleString(),
+              status: latestBackup.backupStatus === 'completed' ? 'success' : 'pending',
+              items: latestBackup.itemCount || 0
+            });
+          }
+        }
+
+        // Fetch devices
+        const devicesResponse = await deviceService.getDevices();
+        if (devicesResponse.devices) {
+          const formattedDevices = devicesResponse.devices.map((device: any) => ({
+            id: device._id,
+            name: device.deviceName,
+            type: device.deviceType,
+            lastSync: new Date(device.lastSyncedAt || device.lastActiveAt).toLocaleString(),
+            status: device.status
+          }));
+          setDevices(formattedDevices);
+        }
+
+        // Fetch sync history
+        const syncHistoryResponse = await syncService.getRecentSyncs(10);
+        if (Array.isArray(syncHistoryResponse)) {
+          const formattedHistory = syncHistoryResponse.map((log: any) => ({
+            id: log._id,
+            date: new Date(log.startedAt).toLocaleString(),
+            status: (log.syncStatus === 'completed' ? 'success' : 'error') as 'success' | 'error',
+            details: log.syncStatus === 'completed' 
+              ? `${log.totalItems || 0} items synced successfully`
+              : log.error?.message || 'Sync failed'
+          }));
+          setSyncHistory(formattedHistory);
+        }
+
+        // Fetch backup settings
+        const settingsResponse = await backupService.getBackupSettings();
+        if (settingsResponse.success && settingsResponse.settings) {
+          setBackupSettings(settingsResponse.settings);
+          setSyncMode(settingsResponse.settings.autoBackupEnabled ? 'auto' : 'manual');
+          setEncryptionEnabled(settingsResponse.settings.encryption);
+        }
+
+        // Fetch backup stats
+        const statsResponse = await backupService.getBackupStats();
+        if (statsResponse.success && statsResponse.stats) {
+          setSyncStatus(prev => ({
+            ...prev,
+            items: statsResponse.stats.totalItems || prev.items
+          }));
+        }
+
+        // Fetch health score
+        try {
+          const healthResponse = await backupService.getHealthScore();
+          if (healthResponse.success) {
+            setHealthScore(healthResponse.health);
+          }
+        } catch (healthError) {
+          console.error('Error fetching health score:', healthError);
+        }
+
+        // Fetch available devices for backup
+        try {
+          const devicesResponse = await backupService.getDevices();
+          if (devicesResponse.success) {
+            setAvailableDevices(devicesResponse.devices);
+          }
+        } catch (devicesError) {
+          console.error('Error fetching devices:', devicesError);
+        }
+
+        // Fetch passwords for selective backup (with delay and pagination)
+        try {
+          await delay(100); // Small delay to avoid rate limiting
+          let allPasswords: any[] = [];
+          let currentPage = 1;
+          let hasMore = true;
+          
+          // Fetch all passwords with pagination (backend limit is 100 per page)
+          while (hasMore && currentPage <= 10) { // Max 10 pages (1000 items)
+            const passwordsResponse = await passwordService.getPasswords({ 
+              limit: 100, 
+              page: currentPage 
+            });
+            
+            if (passwordsResponse.passwords && passwordsResponse.passwords.length > 0) {
+              allPasswords = [...allPasswords, ...passwordsResponse.passwords];
+              
+              // Check if there are more pages
+              if (passwordsResponse.pagination && 
+                  currentPage < passwordsResponse.pagination.pages) {
+                currentPage++;
+                await delay(50); // Small delay between requests
+              } else {
+                hasMore = false;
+              }
+            } else {
+              hasMore = false;
+            }
+          }
+          
+          setSelectablePasswords(allPasswords);
+        } catch (passwordsError) {
+          console.error('Error fetching passwords:', passwordsError);
+        }
+
+        // Fetch documents for selective backup (with delay)
+        try {
+          await delay(100); // Small delay to avoid rate limiting
+          const documentsResponse = await documentService.getDocuments({ limit: 100 });
+          if (documentsResponse.documents) {
+            setSelectableDocuments(documentsResponse.documents);
+          }
+        } catch (documentsError) {
+          console.error('Error fetching documents:', documentsError);
+        }
+
+        // Fetch QR codes for selective backup (with delay)
+        try {
+          await delay(100); // Small delay to avoid rate limiting
+          const qrcodesResponse = await qrcodeService.getQRCodes({ limit: 100 });
+          if (qrcodesResponse.qrcodes) {
+            setSelectableQRCodes(qrcodesResponse.qrcodes);
+          }
+        } catch (qrcodesError) {
+          console.error('Error fetching QR codes:', qrcodesError);
+        }
+
+      } catch (error: any) {
+        console.error('Error fetching backup data:', error);
+        setError(error.response?.data?.message || 'Failed to load backup data');
+      } finally {
+        setDataLoading(false);
+      }
+    };
+
+    fetchAllData();
+  }, []);
 
   useEffect(() => {
     if (isLoading) {
@@ -171,6 +335,14 @@ const BackUp: React.FC = () => {
       minute: 'numeric',
       hour12: true
     });
+  };
+
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
   };
 
   const getDeviceIcon = (type: string) => {
@@ -215,9 +387,15 @@ const BackUp: React.FC = () => {
       setSyncProgress({ total: 100, current: 0, uploading: true });
       setSyncStatus(prev => ({ ...prev, status: 'pending' }));
       
-      setTimeout(() => {
+      // Create backup via API
+      const response = await backupService.createBackup('manual');
+      
+      if (response.success) {
+        const backupId = response.backup.id;
+        
+        // Poll for backup status
         let progress = 0;
-        const interval = setInterval(() => {
+        const interval = setInterval(async () => {
           progress += 10;
           setSyncProgress(prev => ({
             ...prev,
@@ -227,21 +405,31 @@ const BackUp: React.FC = () => {
           if (progress >= 100) {
             clearInterval(interval);
             
-            const newBackup = {
-              id: `v${backupVersions.length + 1}`,
-              timestamp: new Date().toLocaleString(),
-              size: `${Math.floor(Math.random() * 10 + 250)} MB`,
-              type: 'manual' as const,
-              restorable: true
-            };
-            
-            setBackupVersions(prev => [newBackup, ...prev]);
-            
-            setSyncStatus({
-              lastSync: new Date().toLocaleString(),
-              status: 'success',
-              items: syncStatus.items + Math.floor(Math.random() * 10)
-            });
+            // Fetch the completed backup
+            try {
+              const statusResponse = await backupService.getBackupStatus(backupId);
+              
+              if (statusResponse.success && statusResponse.backup) {
+                const backup = statusResponse.backup;
+                const newBackup = {
+                  id: backup._id,
+                  timestamp: new Date(backup.completedAt || backup.createdAt).toLocaleString(),
+                  size: formatBytes(backup.backupSize || 0),
+                  type: backup.backupType as 'auto' | 'manual',
+                  restorable: backup.restorable && backup.backupStatus === 'completed'
+                };
+                
+                setBackupVersions(prev => [newBackup, ...prev]);
+                
+                setSyncStatus({
+                  lastSync: new Date().toLocaleString(),
+                  status: backup.backupStatus === 'completed' ? 'success' : 'pending',
+                  items: backup.itemCount || syncStatus.items
+                });
+              }
+            } catch (error) {
+              console.error('Error fetching backup status:', error);
+            }
             
             setIsLoading(false);
             setSyncProgress({ total: 0, current: 0, uploading: false });
@@ -251,10 +439,11 @@ const BackUp: React.FC = () => {
               setShowBackupModal(false);
             }, 2000);
           }
-        }, 200);
-      }, 1000);
-    } catch (err) {
-      setError('An error occurred during backup');
+        }, 500);
+      }
+    } catch (err: any) {
+      console.error('Backup error:', err);
+      setError(err.response?.data?.message || 'An error occurred during backup');
       setSyncStatus(prev => ({ ...prev, status: 'error' }));
       setIsLoading(false);
       setSyncProgress({ total: 0, current: 0, uploading: false });
@@ -267,6 +456,10 @@ const BackUp: React.FC = () => {
 
   const handleRestore = async (versionId: string) => {
     try {
+      if (!window.confirm('Are you sure you want to restore this backup? This will replace your current data.')) {
+        return;
+      }
+
       setRecoveryStatus({
         inProgress: true,
         progress: 0,
@@ -274,32 +467,40 @@ const BackUp: React.FC = () => {
         estimatedTime: 'Calculating...'
       });
       
-      let progress = 0;
-      const interval = setInterval(() => {
-        progress += 10;
-        setRecoveryStatus(prev => ({
-          ...prev,
-          progress,
-          currentFile: `Recovering file ${progress}/100`,
-          estimatedTime: `${Math.ceil((100 - progress) / 10)} seconds remaining`
-        }));
-        
-        if (progress >= 100) {
-          clearInterval(interval);
+      // Initiate restore via API
+      const response = await backupService.restoreBackup(versionId);
+      
+      if (response.success) {
+        let progress = 0;
+        const interval = setInterval(() => {
+          progress += 10;
           setRecoveryStatus(prev => ({
             ...prev,
-            progress: 100,
-            currentFile: 'Recovery complete',
-            estimatedTime: 'Done'
+            progress,
+            currentFile: `Recovering file ${progress}/100`,
+            estimatedTime: `${Math.ceil((100 - progress) / 10)} seconds remaining`
           }));
           
-          setTimeout(() => {
-            setRecoveryStatus(prev => ({ ...prev, inProgress: false }));
-          }, 2000);
-        }
-      }, 500);
-    } catch (error) {
-      setError('Failed to restore backup');
+          if (progress >= 100) {
+            clearInterval(interval);
+            setRecoveryStatus(prev => ({
+              ...prev,
+              progress: 100,
+              currentFile: 'Recovery complete',
+              estimatedTime: 'Done'
+            }));
+            
+            setTimeout(() => {
+              setRecoveryStatus(prev => ({ ...prev, inProgress: false }));
+              // Refresh data after restore
+              window.location.reload();
+            }, 2000);
+          }
+        }, 500);
+      }
+    } catch (error: any) {
+      console.error('Restore error:', error);
+      setError(error.response?.data?.message || 'Failed to restore backup');
       setRecoveryStatus(prev => ({ ...prev, inProgress: false }));
     }
   };
@@ -313,12 +514,16 @@ const BackUp: React.FC = () => {
       setIsLoading(true);
       setError(null);
       
-      setTimeout(() => {
+      const response = await backupService.deleteBackup(versionId);
+      
+      if (response.success) {
         setBackupVersions(prev => prev.filter(backup => backup.id !== versionId));
-        setIsLoading(false);
-      }, 1000);
-    } catch (err) {
-      setError('Failed to delete backup');
+      }
+      
+      setIsLoading(false);
+    } catch (err: any) {
+      console.error('Delete backup error:', err);
+      setError(err.response?.data?.message || 'Failed to delete backup');
       setIsLoading(false);
     }
   };
@@ -328,20 +533,165 @@ const BackUp: React.FC = () => {
       setIsLoading(true);
       setError(null);
       
-      setTimeout(() => {
-        setBackupSettings(prev => ({
-          ...prev,
-          frequency: syncMode === 'auto' ? 'daily' : 'weekly',
-          encryption: encryptionEnabled
-        }));
-        
+      const updatedSettings = {
+        ...backupSettings,
+        frequency: syncMode === 'auto' ? backupSettings.frequency : ('weekly' as 'daily' | 'weekly' | 'monthly'),
+        encryption: encryptionEnabled,
+        autoBackupEnabled: syncMode === 'auto'
+      };
+      
+      const response = await backupService.updateBackupSettings(updatedSettings);
+      
+      if (response.success) {
+        setBackupSettings(response.settings);
         setShowSettings(false);
-        setIsLoading(false);
-      }, 1000);
-    } catch (err) {
-      setError('Failed to update settings');
+      }
+      
+      setIsLoading(false);
+    } catch (err: any) {
+      console.error('Update settings error:', err);
+      setError(err.response?.data?.message || 'Failed to update settings');
       setIsLoading(false);
     }
+  };
+
+  // New feature handlers
+  const handleSelectiveBackup = async () => {
+    try {
+      if (selectedItems.passwordIds.length === 0 && 
+          selectedItems.documentIds.length === 0 && 
+          selectedItems.qrcodeIds.length === 0) {
+        setError('Please select at least one item to backup');
+        return;
+      }
+
+      setShowSelectiveBackup(false);
+      setShowBackupModal(true);
+      setIsLoading(true);
+      setSyncProgress({ total: 100, current: 0, uploading: true });
+
+      const response = await backupService.createSelectiveBackup(
+        selectedItems,
+        selectedBackupDevice || undefined
+      );
+
+      if (response.success) {
+        // Poll for completion
+        let progress = 0;
+        const interval = setInterval(() => {
+          progress += 10;
+          setSyncProgress(prev => ({ ...prev, current: progress }));
+
+          if (progress >= 100) {
+            clearInterval(interval);
+            setIsLoading(false);
+            
+            // Refresh backup list
+            backupService.getBackupVersions().then(res => {
+              if (res.success && res.backups) {
+                const formattedBackups = res.backups.map((backup: any) => ({
+                  id: backup._id,
+                  timestamp: new Date(backup.createdAt).toLocaleString(),
+                  size: formatBytes(backup.backupSize || 0),
+                  sizeInBytes: backup.backupSize || 0,
+                  type: backup.backupType,
+                  restorable: backup.restorable && backup.backupStatus === 'completed',
+                  itemCount: backup.itemCount || 0,
+                  dataTypes: backup.dataTypes || []
+                }));
+                setBackupVersions(formattedBackups);
+              }
+            });
+
+            // Refresh health score
+            backupService.getHealthScore().then(res => {
+              if (res.success) {
+                setHealthScore(res.health);
+              }
+            });
+
+            setTimeout(() => setShowBackupModal(false), 2000);
+          }
+        }, 500);
+      }
+    } catch (err: any) {
+      console.error('Selective backup error:', err);
+      setError(err.response?.data?.message || 'Failed to create selective backup');
+      setIsLoading(false);
+    }
+  };
+
+  const handleUploadToGoogleDrive = async (backupId: string) => {
+    try {
+      setIsLoading(true);
+      const response = await backupService.uploadToGoogleDrive(backupId);
+      
+      if (response.success) {
+        // Update backup list to show Google Drive link
+        setBackupVersions(prev => prev.map(backup => 
+          backup.id === backupId 
+            ? { ...backup, googleDrive: response.googleDrive }
+            : backup
+        ));
+      }
+      
+      setIsLoading(false);
+    } catch (err: any) {
+      console.error('Google Drive upload error:', err);
+      setError(err.response?.data?.message || 'Failed to upload to Google Drive');
+      setIsLoading(false);
+    }
+  };
+
+  const handleVerifyBackup = async (backupId: string) => {
+    try {
+      setIsLoading(true);
+      const response = await backupService.verifyBackup(backupId);
+      
+      if (response.success) {
+        // Refresh health score after verification
+        const healthResponse = await backupService.getHealthScore();
+        if (healthResponse.success) {
+          setHealthScore(healthResponse.health);
+        }
+      }
+      
+      setIsLoading(false);
+    } catch (err: any) {
+      console.error('Verify backup error:', err);
+      setError(err.response?.data?.message || 'Failed to verify backup');
+      setIsLoading(false);
+    }
+  };
+
+  const toggleItemSelection = (type: 'password' | 'document' | 'qrcode', id: string) => {
+    setSelectedItems(prev => {
+      const key = type === 'password' ? 'passwordIds' : 
+                  type === 'document' ? 'documentIds' : 'qrcodeIds';
+      
+      const currentIds = prev[key];
+      const newIds = currentIds.includes(id)
+        ? currentIds.filter(itemId => itemId !== id)
+        : [...currentIds, id];
+      
+      return { ...prev, [key]: newIds };
+    });
+  };
+
+  const getHealthScoreColor = (score: number) => {
+    if (score >= 90) return 'text-green-400';
+    if (score >= 75) return 'text-green-300';
+    if (score >= 60) return 'text-yellow-300';
+    if (score >= 40) return 'text-orange-400';
+    return 'text-red-400';
+  };
+
+  const getHealthScoreBg = (score: number) => {
+    if (score >= 90) return 'bg-green-500';
+    if (score >= 75) return 'bg-green-400';
+    if (score >= 60) return 'bg-yellow-400';
+    if (score >= 40) return 'bg-orange-500';
+    return 'bg-red-500';
   };
 
   const BackupHeader = () => (
@@ -414,6 +764,23 @@ const BackUp: React.FC = () => {
               </>
             )}
           </div>
+          {healthScore && (
+            <div className="flex items-center gap-2 bg-white/10 backdrop-blur-sm px-3 py-1.5 rounded-full">
+              <div className={`w-2 h-2 rounded-full ${getHealthScoreBg(healthScore.score)}`}></div>
+              <FaShieldAlt className="text-blue-200" size={12} />
+              <span className="text-xs text-blue-50">
+                Health: {healthScore.rating} ({healthScore.score}/100)
+              </span>
+            </div>
+          )}
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setShowSelectiveBackup(true)}
+            className="flex items-center gap-2 bg-white/10 backdrop-blur-sm hover:bg-white/20 px-3 py-1.5 rounded-full text-xs text-blue-50 font-medium border border-white/20 transition-all"
+          >
+            <FaPlus size={10} /> Select Items
+          </motion.button>
         </div>
       </div>
     </div>
@@ -725,6 +1092,30 @@ const BackUp: React.FC = () => {
                   </div>
                   
                   <div className="flex gap-2">
+                    <motion.button
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => handleVerifyBackup(version.id)}
+                      disabled={isLoading}
+                      className={`p-2 rounded-lg ${
+                        isLoading ? 'text-gray-400 cursor-not-allowed' : 'text-green-600 hover:bg-green-50'
+                      }`}
+                      title="Verify backup integrity"
+                    >
+                      <FaCheckCircle />
+                    </motion.button>
+                    <motion.button
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => handleUploadToGoogleDrive(version.id)}
+                      disabled={isLoading}
+                      className={`p-2 rounded-lg ${
+                        isLoading ? 'text-gray-400 cursor-not-allowed' : 'text-indigo-600 hover:bg-indigo-50'
+                      }`}
+                      title="Upload to Google Drive"
+                    >
+                      <FaCloudUploadAlt />
+                    </motion.button>
                     <motion.button
                       whileHover={{ scale: 1.1 }}
                       whileTap={{ scale: 0.95 }}
@@ -1274,6 +1665,17 @@ const BackUp: React.FC = () => {
     return <AuthPrompt />;
   }
 
+  if (dataLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-indigo-200 border-t-indigo-600 mb-4"></div>
+          <p className="text-gray-600">Loading backup data...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8 -mt-4"> {/* Increased spacing between sections and brought content up */}
       <BackupHeader />
@@ -1466,6 +1868,268 @@ const BackUp: React.FC = () => {
                     </div>
                   </div>
                 )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Selective Backup Modal */}
+      <AnimatePresence>
+        {showSelectiveBackup && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto"
+            onClick={() => setShowSelectiveBackup(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full my-8 overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-white">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-2xl font-bold flex items-center gap-3">
+                      <FaDatabase /> Select Items to Backup
+                    </h3>
+                    <p className="text-blue-100 mt-1">Choose specific items you want to include in this backup</p>
+                  </div>
+                  <button
+                    onClick={() => setShowSelectiveBackup(false)}
+                    className="p-2 hover:bg-white/20 rounded-lg transition-colors"
+                  >
+                    <FaTimes size={20} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-6 max-h-[calc(90vh-250px)] overflow-y-auto">
+                {/* Device Selector */}
+                <div className="mb-6">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <FaLaptop className="inline mr-2" />
+                    Select Device (Optional)
+                  </label>
+                  <select
+                    value={selectedBackupDevice}
+                    onChange={(e) => setSelectedBackupDevice(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">All Devices</option>
+                    {availableDevices.map((device: any) => (
+                      <option key={device.id} value={device.id}>
+                        {device.name} ({device.type}) - {device.status}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Selection Summary */}
+                <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-gray-700">Selected Items:</span>
+                    <span className="text-lg font-bold text-blue-600">
+                      {selectedItems.passwordIds.length + selectedItems.documentIds.length + selectedItems.qrcodeIds.length}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex gap-3 text-xs text-gray-600">
+                    <span>{selectedItems.passwordIds.length} Passwords</span>
+                    <span>•</span>
+                    <span>{selectedItems.documentIds.length} Documents</span>
+                    <span>•</span>
+                    <span>{selectedItems.qrcodeIds.length} QR Codes</span>
+                  </div>
+                </div>
+
+                {/* Item Selection */}
+                <div className="space-y-6">
+                  {/* Passwords Section */}
+                  {selectablePasswords.length > 0 && (
+                    <div className="border border-gray-200 rounded-lg overflow-hidden">
+                      <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                        <h4 className="font-semibold text-gray-800 flex items-center gap-2">
+                          <FaLock className="text-blue-600" />
+                          Passwords & Cards ({selectablePasswords.length})
+                        </h4>
+                      </div>
+                      <div className="p-4 max-h-60 overflow-y-auto">
+                        <div className="space-y-2">
+                          {selectablePasswords.map((password) => (
+                            <div 
+                              key={password._id} 
+                              className="flex items-center gap-3 p-2 hover:bg-blue-50 rounded-lg cursor-pointer transition-colors"
+                              onClick={() => toggleItemSelection('password', password._id)}
+                            >
+                              <input 
+                                type="checkbox" 
+                                checked={selectedItems.passwordIds.includes(password._id)}
+                                onChange={() => toggleItemSelection('password', password._id)}
+                                onClick={(e) => e.stopPropagation()}
+                                className="w-4 h-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                              />
+                              <FaLock className="text-gray-400" />
+                              <div className="flex-1 min-w-0">
+                                <span className="text-sm font-medium text-gray-700 block truncate">
+                                  {password.title}
+                                </span>
+                                {password.website && (
+                                  <span className="text-xs text-gray-500 block truncate">
+                                    {password.website}
+                                  </span>
+                                )}
+                              </div>
+                              {password.category && (
+                                <span className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded-full">
+                                  {password.category}
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Documents Section */}
+                  {selectableDocuments.length > 0 && (
+                    <div className="border border-gray-200 rounded-lg overflow-hidden">
+                      <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                        <h4 className="font-semibold text-gray-800 flex items-center gap-2">
+                          <FaDatabase className="text-green-600" />
+                          Documents ({selectableDocuments.length})
+                        </h4>
+                      </div>
+                      <div className="p-3 max-h-48 overflow-y-auto">
+                        <div className="space-y-1">
+                          {selectableDocuments.map((doc) => (
+                            <div 
+                              key={doc._id} 
+                              className="flex items-center gap-3 p-2 hover:bg-green-50 rounded-lg cursor-pointer transition-colors"
+                              onClick={() => toggleItemSelection('document', doc._id)}
+                            >
+                              <input 
+                                type="checkbox" 
+                                checked={selectedItems.documentIds.includes(doc._id)}
+                                onChange={() => toggleItemSelection('document', doc._id)}
+                                onClick={(e) => e.stopPropagation()}
+                                className="w-4 h-4 text-green-600 focus:ring-green-500 border-gray-300 rounded flex-shrink-0"
+                              />
+                              <FaDatabase className="text-gray-400 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <span className="text-sm font-medium text-gray-700 block truncate">
+                                  {doc.fileName}
+                                </span>
+                                <span className="text-xs text-gray-500 block">
+                                  {doc.fileType} • {formatBytes(doc.fileSize)}
+                                </span>
+                              </div>
+                              {doc.category && (
+                                <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded-full flex-shrink-0">
+                                  {doc.category}
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* QR Codes Section */}
+                  {selectableQRCodes.length > 0 && (
+                    <div className="border border-gray-200 rounded-lg overflow-hidden">
+                      <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                        <h4 className="font-semibold text-gray-800 flex items-center gap-2">
+                          <FaShieldAlt className="text-purple-600" />
+                          QR Codes ({selectableQRCodes.length})
+                        </h4>
+                      </div>
+                      <div className="p-3 max-h-48 overflow-y-auto">
+                        <div className="space-y-1">
+                          {selectableQRCodes.map((qr) => (
+                            <div 
+                              key={qr._id} 
+                              className="flex items-center gap-3 p-2 hover:bg-purple-50 rounded-lg cursor-pointer transition-colors"
+                              onClick={() => toggleItemSelection('qrcode', qr._id)}
+                            >
+                              <input 
+                                type="checkbox" 
+                                checked={selectedItems.qrcodeIds.includes(qr._id)}
+                                onChange={() => toggleItemSelection('qrcode', qr._id)}
+                                onClick={(e) => e.stopPropagation()}
+                                className="w-4 h-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded flex-shrink-0"
+                              />
+                              <FaShieldAlt className="text-gray-400 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <span className="text-sm font-medium text-gray-700 block truncate">
+                                  {qr.title}
+                                </span>
+                                <span className="text-xs text-gray-500 block">
+                                  {qr.qrType} • Scans: {qr.scanCount}
+                                </span>
+                              </div>
+                              {qr.isActive ? (
+                                <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded-full">
+                                  Active
+                                </span>
+                              ) : (
+                                <span className="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded-full">
+                                  Inactive
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Empty State */}
+                  {selectablePasswords.length === 0 && selectableDocuments.length === 0 && selectableQRCodes.length === 0 && (
+                    <div className="p-8 border-2 border-dashed border-gray-300 rounded-lg text-center">
+                      <FaDatabase className="mx-auto text-4xl text-gray-400 mb-3" />
+                      <p className="text-gray-600 mb-2">No items available</p>
+                      <p className="text-sm text-gray-500">
+                        Add passwords, documents, or QR codes to enable selective backup.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-4 bg-gray-50 border-t border-gray-200 flex flex-wrap justify-between items-center gap-3">
+                <button
+                  onClick={() => {
+                    setSelectedItems({ passwordIds: [], documentIds: [], qrcodeIds: [] });
+                    setSelectedBackupDevice('');
+                  }}
+                  className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium transition-colors"
+                >
+                  Clear Selection
+                </button>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowSelectiveBackup(false)}
+                    className="px-5 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handleSelectiveBackup}
+                    disabled={isLoading || (selectedItems.passwordIds.length === 0 && selectedItems.documentIds.length === 0 && selectedItems.qrcodeIds.length === 0)}
+                    className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-all"
+                  >
+                    <FaCloudUploadAlt />
+                    {isLoading ? 'Creating Backup...' : 'Create Selective Backup'}
+                  </motion.button>
+                </div>
               </div>
             </motion.div>
           </motion.div>

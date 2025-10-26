@@ -1,12 +1,15 @@
 import express from 'express';
 import { body, validationResult } from 'express-validator';
 import User from '../models/User.js';
+import SecureDocument from '../models/SecureDocument.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { logger } from '../utils/logger.js';
 import upload from '../middleware/upload.js';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+import mongoose from 'mongoose';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -425,6 +428,11 @@ router.post('/sessions/revoke', async (req, res) => {
 // @access  Private
 router.post('/documents/upload', upload.single('document'), async (req, res) => {
   try {
+    console.log('=== Document Upload Request ===');
+    console.log('User ID:', req.user.userId);
+    console.log('File:', req.file);
+    console.log('Body:', req.body);
+
     if (!req.file) {
       return res.status(400).json({
         success: false,
@@ -460,7 +468,47 @@ router.post('/documents/upload', upload.single('document'), async (req, res) => 
       });
     }
 
-    // Prepare document object
+    // Generate encryption key for SecureDocument
+    const encryptionKey = crypto.randomBytes(32).toString('hex');
+    const iv = crypto.randomBytes(16).toString('hex');
+
+    // Create SecureDocument entry (for backup system)
+    const secureDocument = new SecureDocument({
+      userId: new mongoose.Types.ObjectId(req.user.userId),
+      fileName: `${Date.now()}_${req.file.originalname}`,
+      originalName: req.file.originalname,
+      fileSize: req.file.size,
+      fileType: path.extname(req.file.originalname).substring(1).toLowerCase(),
+      mimeType: req.file.mimetype,
+      filePath: req.file.path,
+      encryptionKey: encryptionKey,
+      encryptionType: 'AES-256',
+      category: category === 'identity' ? 'document' : 'document',
+      tags: [category, documentType],
+      description: `${documentType} - ${category}`,
+      metadata: {
+        iv: iv,
+        documentType: documentType,
+        category: category,
+        ...(category === 'identity' && {
+          number: number || '',
+          expiryDate: expiryDate || '',
+          status: status || 'active'
+        }),
+        ...(category === 'financial' && {
+          institution: institution || '',
+          lastUpdated: lastUpdated || new Date().toLocaleDateString()
+        })
+      },
+      isArchived: false,
+      isFavorite: false
+    });
+
+    await secureDocument.save();
+
+    console.log('SecureDocument created:', secureDocument._id);
+
+    // Prepare document object for User profile
     const documentData = {
       type: documentType,
       fileName: req.file.originalname,
@@ -505,17 +553,19 @@ router.post('/documents/upload', upload.single('document'), async (req, res) => 
     
     await user.save();
 
-    logger.info(`Document uploaded for user: ${user.email}, category: ${category}`);
+    logger.info(`Document uploaded for user: ${user.email}, category: ${category}, SecureDocument ID: ${secureDocument._id}`);
 
     res.json({
       success: true,
       message: 'Document uploaded successfully',
       data: {
-        document: documentData
+        document: documentData,
+        secureDocumentId: secureDocument._id
       }
     });
 
   } catch (error) {
+    console.error('Upload error:', error);
     // Clean up uploaded file in case of error
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
@@ -1271,7 +1321,7 @@ router.put('/notifications/:notificationId/read', async (req, res) => {
 // @route   PUT /api/user/notifications/mark-all-read
 // @desc    Mark all notifications as read
 // @access  Private
-router.put('/notifications/mark-all-read', async (req, res) => {
+router.put('/notifications/mark-all-read', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
     if (!user) {

@@ -330,22 +330,37 @@ const Notifications = () => {
       const regularNotifications = notifications.filter(n => !n.isAlertType && !n.isRead);
       const alertNotifications = notifications.filter(n => n.isAlertType && !n.isRead);
       
-      // Mark all regular notifications as read
+      // Mark all regular notifications as read (if any exist)
       if (regularNotifications.length > 0) {
         await axios.put(
           `${API_URL}/user/notifications/mark-all-read`,
           {},
           { headers: { Authorization: `Bearer ${token}` } }
-        ).catch(err => console.error('Error marking regular notifications as read:', err));
+        ).catch(err => {
+          console.error('Error marking regular notifications as read:', err);
+          throw err; // Re-throw to prevent local state update on failure
+        });
       }
       
-      // For alerts, just update local state (no backend endpoint yet)
-      // In a real implementation, you'd call an alert service endpoint here
+      // Mark all alerts as read (if any exist)
+      if (alertNotifications.length > 0) {
+        await axios.put(
+          `${API_URL}/alerts/mark-all-read`,
+          {},
+          { headers: { Authorization: `Bearer ${token}` } }
+        ).catch(err => {
+          console.error('Error marking alerts as read:', err);
+          throw err; // Re-throw to prevent local state update on failure
+        });
+      }
       
-      // Update local state for all
+      // Update local state only after successful backend updates
       setNotifications(prev => prev.map(n => ({...n, isRead: true, readAt: new Date().toISOString()})));
-    } catch (err) {
+      
+      console.log('✅ All notifications marked as read successfully');
+    } catch (err: any) {
       console.error('Error marking all as read:', err);
+      alert(err.response?.data?.message || 'Failed to mark all as read. Please try again.');
     }
   };
 
@@ -566,30 +581,32 @@ const Notifications = () => {
           )}
         </motion.div>
       ) : (
-        <motion.div 
-          initial="hidden"
-          animate="visible"
-          variants={{
-            hidden: { opacity: 0 },
-            visible: { 
-              opacity: 1,
-              transition: { staggerChildren: 0.1 }
-            }
-          }}
-          className="space-y-4"
-        >
-          {filteredNotifications.map((notification) => (
-            <motion.div
-              key={notification._id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, x: -100 }}
-              whileHover={{ y: -4, boxShadow: "0 12px 24px rgba(0, 0, 0, 0.05)" }}
-              transition={{ duration: 0.2 }}
-              className={`bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100 ${
-                !notification.isRead ? 'border-l-4 border-l-indigo-500' : ''
-              }`}
-            >
+        <AnimatePresence mode="popLayout">
+          <motion.div 
+            initial="hidden"
+            animate="visible"
+            variants={{
+              hidden: { opacity: 0 },
+              visible: { 
+                opacity: 1,
+                transition: { staggerChildren: 0.1 }
+              }
+            }}
+            className="space-y-4"
+          >
+            {filteredNotifications.map((notification) => (
+              <motion.div
+                key={notification._id}
+                layout
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, x: -100 }}
+                whileHover={{ y: -4, boxShadow: "0 12px 24px rgba(0, 0, 0, 0.05)" }}
+                transition={{ duration: 0.2 }}
+                className={`bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100 ${
+                  !notification.isRead ? 'border-l-4 border-l-indigo-500' : ''
+                }`}
+              >
               <div className="p-5 flex">
                 <div className="mr-4 flex-shrink-0">
                   {getIcon(notification.type)}
@@ -699,7 +716,8 @@ const Notifications = () => {
               </button>
             </div>
           )}
-        </motion.div>
+          </motion.div>
+        </AnimatePresence>
       )}
     </div>
   );

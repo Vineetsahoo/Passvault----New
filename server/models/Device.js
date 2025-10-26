@@ -99,6 +99,32 @@ const deviceSchema = new Schema({
   deviceFingerprint: {
     type: String,
     default: null
+  },
+  // Verification fields
+  isVerified: {
+    type: Boolean,
+    default: false
+  },
+  verificationCode: {
+    type: String,
+    default: null
+  },
+  verificationCodeExpiry: {
+    type: Date,
+    default: null
+  },
+  verificationAttempts: {
+    type: Number,
+    default: 0
+  },
+  verifiedAt: {
+    type: Date,
+    default: null
+  },
+  verificationMethod: {
+    type: String,
+    enum: ['email', 'manual', 'qr', null],
+    default: null
   }
 }, {
   timestamps: true
@@ -122,6 +148,47 @@ deviceSchema.methods.updateSyncStatus = function(status) {
     this.lastSyncedAt = new Date();
   }
   return this.save();
+};
+
+// Method to generate verification code
+deviceSchema.methods.generateVerificationCode = function() {
+  // Generate 6-digit code
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  this.verificationCode = code;
+  // Code expires in 10 minutes
+  this.verificationCodeExpiry = new Date(Date.now() + 10 * 60 * 1000);
+  this.verificationAttempts = 0;
+  return code;
+};
+
+// Method to verify code
+deviceSchema.methods.verifyCode = function(code) {
+  // Check if code is expired
+  if (this.verificationCodeExpiry < new Date()) {
+    return { success: false, message: 'Verification code has expired' };
+  }
+
+  // Check attempts limit (max 5 attempts)
+  if (this.verificationAttempts >= 5) {
+    return { success: false, message: 'Too many failed attempts. Please request a new code.' };
+  }
+
+  // Verify code
+  if (this.verificationCode === code) {
+    this.isVerified = true;
+    this.verifiedAt = new Date();
+    this.verificationCode = null;
+    this.verificationCodeExpiry = null;
+    this.verificationAttempts = 0;
+    this.isTrusted = true; // Auto-trust verified devices
+    return { success: true, message: 'Device verified successfully' };
+  } else {
+    this.verificationAttempts += 1;
+    return { 
+      success: false, 
+      message: `Invalid code. ${5 - this.verificationAttempts} attempts remaining.` 
+    };
+  }
 };
 
 const Device = mongoose.model('Device', deviceSchema);

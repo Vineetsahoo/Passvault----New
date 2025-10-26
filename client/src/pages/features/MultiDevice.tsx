@@ -15,6 +15,8 @@ import {
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
+import deviceService from '../../services/deviceService';
+import syncService from '../../services/syncService';
 
 interface FeatureTemplateProps {
   title: string;
@@ -139,19 +141,31 @@ const MultiDevice = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAddDevice, setShowAddDevice] = useState(false);
   const [deviceLimit] = useState(5);
-  const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([
-    { id: '1', name: 'Personal', devices: ['1', '2'] },
-    { id: '2', name: 'Work', devices: ['3'] }
-  ]);
-  
-  const [devicePermissions, setDevicePermissions] = useState<Record<string, DevicePermission>>({
-    '1': { canSync: true, canShare: true, canModify: true, requiresVerification: false },
-    '2': { canSync: true, canShare: false, canModify: false, requiresVerification: true },
-    '3': { canSync: true, canShare: true, canModify: false, requiresVerification: true }
+  const [deviceStats, setDeviceStats] = useState({
+    total: 0,
+    online: 0,
+    offline: 0
   });
+  const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([]);
+  const [devicePermissions, setDevicePermissions] = useState<Record<string, DevicePermission>>({});
+  
+  // New state for device registration
+  const [newDeviceName, setNewDeviceName] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [registrationSuccess, setRegistrationSuccess] = useState(false);
+  
+  // Verification state
+  const [showVerificationModal, setShowVerificationModal] = useState(false);
+  const [verificationDeviceId, setVerificationDeviceId] = useState<string | null>(null);
+  const [verificationDeviceName, setVerificationDeviceName] = useState('');
+  const [verificationCode, setVerificationCode] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verificationError, setVerificationError] = useState<string | null>(null);
+  const [isResendingCode, setIsResendingCode] = useState(false);
 
   const getDeviceIcon = (type: string) => {
     switch (type) {
@@ -165,51 +179,78 @@ const MultiDevice = () => {
 
   useEffect(() => {
     const checkAuthAndLoadDevices = async () => {
-      // Simulate auth check
-      const authStatus = localStorage.getItem('isAuthenticated') === 'true';
+      // Check auth status
+      const token = localStorage.getItem('accessToken');
+      const authStatus = !!token;
       setIsAuthenticated(authStatus);
+      
+      console.log('🔐 Auth Status:', authStatus);
+      console.log('🎫 Token exists:', !!token);
       
       if (authStatus) {
         try {
-          // Only fetch devices if authenticated
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          setDevices([
-            {
-              id: '1',
-              name: 'iPhone 13 Pro',
-              type: 'smartphone',
-              lastActive: new Date(),
-              status: 'online',
-              browser: 'Safari',
-              os: 'iOS 15',
-              isCurrentDevice: true
-            },
-            {
-              id: '2',
-              name: 'MacBook Air',
-              type: 'laptop',
-              lastActive: new Date(Date.now() - 3600000),
-              status: 'idle',
-              browser: 'Chrome',
-              os: 'macOS',
-              isCurrentDevice: false
-            },
-            {
-              id: '3',
-              name: 'Office PC',
-              type: 'desktop',
-              lastActive: new Date(Date.now() - 86400000),
-              status: 'offline',
-              browser: 'Firefox',
-              os: 'Windows 11',
-              isCurrentDevice: false
-            }
-          ]);
+          setDataLoading(true);
+          
+          console.log('📡 Fetching devices from API...');
+          // Fetch devices from API
+          const devicesResponse = await deviceService.getDevices();
+          console.log('✅ Devices response:', devicesResponse);
+          
+          // Map API devices to component format
+          const mappedDevices: Device[] = devicesResponse.devices.map((device: any) => ({
+            id: device._id,
+            name: device.deviceName,
+            type: device.deviceType === 'mobile' ? 'smartphone' : device.deviceType,
+            lastActive: new Date(device.lastActiveAt),
+            status: device.status === 'syncing' ? 'idle' : device.status,
+            browser: device.browser,
+            os: device.operatingSystem,
+            isCurrentDevice: device.isPrimary
+          }));
+          
+          console.log('📱 Mapped devices:', mappedDevices);
+          setDevices(mappedDevices);
+          
+          // Set device stats
+          setDeviceStats({
+            total: devicesResponse.stats.total,
+            online: devicesResponse.stats.online,
+            offline: devicesResponse.stats.offline
+          });
+          console.log('📊 Device stats:', devicesResponse.stats);
+          
+          // Fetch device statistics for additional info
+          const stats = await deviceService.getDeviceStats();
+          console.log('📈 Additional stats:', stats);
+          
+          // Initialize device permissions from API data
+          const permissions: Record<string, DevicePermission> = {};
+          devicesResponse.devices.forEach((device: any) => {
+            permissions[device._id] = {
+              canSync: device.syncEnabled,
+              canShare: device.isTrusted,
+              canModify: device.isTrusted,
+              requiresVerification: !device.isVerified // Check isVerified field
+            };
+          });
+          setDevicePermissions(permissions);
+          
           setLoading(false);
-        } catch (err) {
-          setError('Failed to load devices');
+          setDataLoading(false);
+        } catch (err: any) {
+          console.error('❌ Failed to load devices:', err);
+          console.error('❌ Error details:', {
+            message: err.message,
+            response: err.response?.data,
+            status: err.response?.status
+          });
+          setError(err.response?.data?.message || 'Failed to load devices');
           setLoading(false);
+          setDataLoading(false);
         }
+      } else {
+        setLoading(false);
+        setDataLoading(false);
       }
     };
 
@@ -217,26 +258,292 @@ const MultiDevice = () => {
   }, []);
 
   const handleRemoveDevice = async (deviceId: string) => {
+    if (!window.confirm('Are you sure you want to remove this device? This action cannot be undone.')) {
+      return;
+    }
+    
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Get device name before deletion
+      const device = devices.find(d => d.id === deviceId);
+      const deviceName = device?.name || 'Unknown Device';
+      
+      // Call API to remove device
+      await deviceService.deleteDevice(deviceId, deviceName);
+      
+      // Update local state
       setDevices(prev => prev.filter(device => device.id !== deviceId));
-    } catch (err) {
-      setError('Failed to remove device');
+      setDeviceStats(prev => ({
+        ...prev,
+        total: prev.total - 1
+      }));
+      
+      // Remove device permissions
+      setDevicePermissions(prev => {
+        const newPerms = { ...prev };
+        delete newPerms[deviceId];
+        return newPerms;
+      });
+    } catch (err: any) {
+      console.error('Failed to remove device:', err);
+      setError(err.response?.data?.message || 'Failed to remove device');
     }
   };
 
-  const handleUpdateDeviceName = (deviceId: string, newName: string) => {
-    setDevices(prev => prev.map(device => 
-      device.id === deviceId ? { ...device, name: newName } : device
-    ));
+  const handleUpdateDeviceName = async (deviceId: string, newName: string) => {
+    try {
+      // Call API to update device name
+      await deviceService.updateDevice(deviceId, {
+        deviceName: newName
+      });
+      
+      // Update local state
+      setDevices(prev => prev.map(device => 
+        device.id === deviceId ? { ...device, name: newName } : device
+      ));
+    } catch (err: any) {
+      console.error('Failed to update device name:', err);
+      setError(err.response?.data?.message || 'Failed to update device name');
+    }
   };
 
-  const handleUpdateDevicePermissions = (deviceId: string, permissions: Partial<DevicePermission>) => {
-    setDevicePermissions(prev => ({
-      ...prev,
-      [deviceId]: { ...prev[deviceId], ...permissions }
-    }));
+  const handleUpdateDevicePermissions = async (deviceId: string, permissions: Partial<DevicePermission>) => {
+    try {
+      // Map permissions to API format
+      const updateData: any = {};
+      
+      if ('canSync' in permissions) {
+        updateData.syncEnabled = permissions.canSync;
+      }
+      if ('canShare' in permissions || 'canModify' in permissions) {
+        // isTrusted affects both canShare and canModify
+        updateData.isTrusted = permissions.canShare || permissions.canModify;
+      }
+      
+      // Call API to update device
+      await deviceService.updateDevice(deviceId, updateData);
+      
+      // Update local state
+      setDevicePermissions(prev => ({
+        ...prev,
+        [deviceId]: { ...prev[deviceId], ...permissions }
+      }));
+    } catch (err: any) {
+      console.error('Failed to update device permissions:', err);
+      setError(err.response?.data?.message || 'Failed to update device permissions');
+    }
+  };
+
+  const handleSyncDevice = async (deviceId: string) => {
+    try {
+      // Update device status to syncing
+      setDevices(prev => prev.map(device => 
+        device.id === deviceId ? { ...device, status: 'idle' } : device
+      ));
+      
+      // Trigger sync via API
+      const response = await deviceService.triggerSync(deviceId);
+      
+      // Update device status back to online after sync
+      setTimeout(() => {
+        setDevices(prev => prev.map(device => 
+          device.id === deviceId ? { ...device, status: 'online', lastActive: new Date() } : device
+        ));
+      }, 2000);
+      
+    } catch (err: any) {
+      console.error('Failed to sync device:', err);
+      setError(err.response?.data?.message || 'Failed to sync device');
+      
+      // Revert status on error
+      setDevices(prev => prev.map(device => 
+        device.id === deviceId ? { ...device, status: 'online' } : device
+      ));
+    }
+  };
+
+  const handleRegisterDevice = async () => {
+    if (!newDeviceName.trim()) {
+      setError('Please enter a device name');
+      return;
+    }
+
+    try {
+      setIsRegistering(true);
+      setError(null);
+
+      // Get current device information automatically
+      const deviceInfo = deviceService.getCurrentDeviceInfo();
+      
+      console.log('Registering device with info:', {
+        deviceName: newDeviceName,
+        ...deviceInfo
+      });
+      
+      // Register the device with custom name
+      const registeredDevice = await deviceService.registerDevice({
+        deviceName: newDeviceName,
+        deviceType: deviceInfo.deviceType!,
+        operatingSystem: deviceInfo.operatingSystem!,
+        browser: deviceInfo.browser!,
+      });
+
+      console.log('Device registered successfully:', registeredDevice);
+
+      // Map the new device to component format
+      const newDevice: Device = {
+        id: registeredDevice._id,
+        name: registeredDevice.deviceName,
+        type: registeredDevice.deviceType === 'mobile' ? 'smartphone' : registeredDevice.deviceType,
+        lastActive: new Date(registeredDevice.lastActiveAt),
+        status: registeredDevice.status === 'syncing' ? 'idle' : registeredDevice.status,
+        browser: registeredDevice.browser || deviceInfo.browser || 'Unknown',
+        os: registeredDevice.operatingSystem || deviceInfo.operatingSystem || 'Unknown',
+        isCurrentDevice: false
+      };
+
+      // Add device to list
+      setDevices(prev => [...prev, newDevice]);
+      
+      // Update stats
+      setDeviceStats(prev => ({
+        ...prev,
+        total: prev.total + 1,
+        online: prev.online + 1
+      }));
+
+      // Initialize permissions for new device
+      setDevicePermissions(prev => ({
+        ...prev,
+        [registeredDevice._id]: {
+          canSync: registeredDevice.syncEnabled !== undefined ? registeredDevice.syncEnabled : true,
+          canShare: registeredDevice.isTrusted !== undefined ? registeredDevice.isTrusted : false,
+          canModify: registeredDevice.isTrusted !== undefined ? registeredDevice.isTrusted : false,
+          requiresVerification: registeredDevice.isTrusted !== undefined ? !registeredDevice.isTrusted : true
+        }
+      }));
+
+      // Show success state
+      setRegistrationSuccess(true);
+      setNewDeviceName('');
+      
+      // Reset form after 2 seconds
+      setTimeout(() => {
+        setShowAddDevice(false);
+        setRegistrationSuccess(false);
+      }, 2000);
+
+    } catch (err: any) {
+      console.error('Failed to register device:', err);
+      console.error('Error response:', err.response?.data);
+      console.error('Error details:', {
+        status: err.response?.status,
+        statusText: err.response?.statusText,
+        data: err.response?.data,
+        message: err.message
+      });
+      
+      // Show detailed error message
+      let errorMessage = 'Failed to register device';
+      if (err.response?.data?.message) {
+        errorMessage = err.response.data.message;
+      } else if (err.response?.data?.errors) {
+        errorMessage = err.response.data.errors.join(', ');
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      
+      setError(errorMessage);
+    } finally {
+      setIsRegistering(false);
+    }
+  };
+
+  const handleCancelAddDevice = () => {
+    setShowAddDevice(false);
+    setNewDeviceName('');
+    setRegistrationSuccess(false);
+    setError(null);
+  };
+
+  const handleOpenVerificationModal = (deviceId: string, deviceName: string) => {
+    setVerificationDeviceId(deviceId);
+    setVerificationDeviceName(deviceName);
+    setShowVerificationModal(true);
+    setVerificationCode('');
+    setVerificationError(null);
+  };
+
+  const handleCloseVerificationModal = () => {
+    setShowVerificationModal(false);
+    setVerificationDeviceId(null);
+    setVerificationDeviceName('');
+    setVerificationCode('');
+    setVerificationError(null);
+  };
+
+  const handleVerifyDevice = async () => {
+    if (!verificationDeviceId || !verificationCode.trim()) {
+      setVerificationError('Please enter the verification code');
+      return;
+    }
+
+    if (verificationCode.length !== 6) {
+      setVerificationError('Code must be 6 digits');
+      return;
+    }
+
+    try {
+      setIsVerifying(true);
+      setVerificationError(null);
+
+      const result = await deviceService.verifyDevice(
+        verificationDeviceId, 
+        verificationCode,
+        verificationDeviceName
+      );
+
+      if (result.success) {
+        // Show success message
+        setVerificationError('✓ Device verified successfully!');
+        
+        // Close modal and reload after 1.5 seconds
+        setTimeout(() => {
+          handleCloseVerificationModal();
+          window.location.reload();
+        }, 1500);
+      }
+    } catch (err: any) {
+      console.error('Verification failed:', err);
+      setVerificationError(
+        err.response?.data?.message || 'Verification failed. Please try again.'
+      );
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const handleResendCode = async () => {
+    if (!verificationDeviceId) return;
+
+    try {
+      setIsResendingCode(true);
+      setVerificationError(null);
+
+      await deviceService.resendVerificationCode(verificationDeviceId);
+      setVerificationError('✓ New code sent! Check the backend console.');
+      
+      // Clear success message after 3 seconds
+      setTimeout(() => {
+        setVerificationError(null);
+      }, 3000);
+    } catch (err: any) {
+      console.error('Failed to resend code:', err);
+      setVerificationError(
+        err.response?.data?.message || 'Failed to resend code'
+      );
+    } finally {
+      setIsResendingCode(false);
+    }
   };
 
   const getStatusColor = (status: string) => {
@@ -258,6 +565,13 @@ const MultiDevice = () => {
       >
         {!isAuthenticated ? (
           <AuthPrompt />
+        ) : dataLoading ? (
+          <div className="flex items-center justify-center py-20">
+            <div className="text-center">
+              <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-indigo-200 border-t-indigo-600 mb-4"></div>
+              <p className="text-gray-600">Loading device data...</p>
+            </div>
+          </div>
         ) : (
           <div className="space-y-8">
             {error && (
@@ -457,18 +771,24 @@ const MultiDevice = () => {
                               <label className="text-sm font-medium text-slate-700 block">
                                 Verification Status
                               </label>
-                              <div className={`flex items-center gap-3 p-2 rounded-lg border ${
-                                devicePermissions[device.id]?.requiresVerification 
-                                  ? 'bg-amber-50 border-amber-200 text-amber-800' 
-                                  : 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                              }`}>
-                                <Shield className="h-5 w-5" />
-                                <span className="text-sm font-medium">
-                                  {devicePermissions[device.id]?.requiresVerification 
-                                    ? 'Verification Required' 
-                                    : 'Verified'}
-                                </span>
-                              </div>
+                              {devicePermissions[device.id]?.requiresVerification ? (
+                                <button
+                                  onClick={() => handleOpenVerificationModal(device.id, device.name)}
+                                  className="flex items-center gap-3 p-2 rounded-lg border bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100 transition-colors w-full group"
+                                >
+                                  <Shield className="h-5 w-5 group-hover:scale-110 transition-transform" />
+                                  <span className="text-sm font-medium">
+                                    🔒 Click to Verify Device
+                                  </span>
+                                </button>
+                              ) : (
+                                <div className="flex items-center gap-3 p-2 rounded-lg border bg-emerald-50 border-emerald-200 text-emerald-800">
+                                  <Shield className="h-5 w-5" />
+                                  <span className="text-sm font-medium">
+                                    ✓ Verified
+                                  </span>
+                                </div>
+                              )}
                             </div>
                           </div>
 
@@ -503,7 +823,10 @@ const MultiDevice = () => {
                           </div>
 
                           <div className="mt-5 flex justify-end gap-3">
-                            <button className="text-sm px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg flex items-center gap-2 transition-colors shadow-sm">
+                            <button 
+                              onClick={() => handleSyncDevice(device.id)}
+                              className="text-sm px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg flex items-center gap-2 transition-colors shadow-sm"
+                            >
                               <RefreshCw className="h-4 w-4" />
                               Sync Now
                             </button>
@@ -526,37 +849,248 @@ const MultiDevice = () => {
                 <div className="bg-gradient-to-r from-indigo-50 to-blue-50/30 p-4 border-b border-slate-200/60">
                   <h3 className="font-medium flex items-center gap-2 text-slate-800">
                     <Plus className="h-5 w-5 text-indigo-600" />
-                    Link New Device
+                    Register Current Device
                   </h3>
                 </div>
                 <div className="p-6">
-                  <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-indigo-200 rounded-xl bg-indigo-50/30 mb-5">
-                    <div className="bg-white p-8 rounded-xl shadow-md mb-4">
-                      <div className="text-6xl font-bold tracking-widest text-indigo-700 select-all">
-                        {Math.random().toString(36).substr(2, 6).toUpperCase()}
+                  {registrationSuccess ? (
+                    <div className="flex flex-col items-center justify-center p-8 border-2 border-emerald-200 rounded-xl bg-emerald-50/30">
+                      <div className="bg-emerald-100 p-4 rounded-full mb-4">
+                        <svg className="h-12 w-12 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
                       </div>
+                      <h4 className="text-xl font-semibold text-emerald-800 mb-2">Device Registered Successfully!</h4>
+                      <p className="text-sm text-emerald-600">Your device has been added to your account</p>
                     </div>
-                    <p className="text-sm text-slate-700 font-medium">
-                      Enter this code on your new device to link it
+                  ) : (
+                    <>
+                      <div className="mb-6">
+                        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
+                          <div className="flex items-start gap-3">
+                            <div className="bg-blue-100 p-2 rounded-lg">
+                              <Smartphone className="h-5 w-5 text-blue-600" />
+                            </div>
+                            <div className="flex-1">
+                              <h4 className="font-medium text-blue-900 mb-1">Auto-Detected Device Info</h4>
+                              <div className="text-sm text-blue-700 space-y-1">
+                                {(() => {
+                                  const info = deviceService.getCurrentDeviceInfo();
+                                  return (
+                                    <>
+                                      <p><strong>Type:</strong> {info.deviceType}</p>
+                                      <p><strong>OS:</strong> {info.operatingSystem}</p>
+                                      <p><strong>Browser:</strong> {info.browser}</p>
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="block text-sm font-medium text-slate-700">
+                            Device Name / Nickname
+                          </label>
+                          <input
+                            type="text"
+                            value={newDeviceName}
+                            onChange={(e) => setNewDeviceName(e.target.value)}
+                            placeholder="e.g., My Laptop, Work PC, iPhone 13"
+                            className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all shadow-sm"
+                            disabled={isRegistering}
+                            onKeyPress={(e) => {
+                              if (e.key === 'Enter' && !isRegistering) {
+                                handleRegisterDevice();
+                              }
+                            }}
+                          />
+                          <p className="text-xs text-slate-500">
+                            Give your device a memorable name to identify it easily
+                          </p>
+                        </div>
+                      </div>
+
+                      {error && (
+                        <div className="mb-4 bg-rose-50 border border-rose-200 p-3 rounded-lg flex items-center gap-2">
+                          <AlertCircle className="h-5 w-5 text-rose-500 flex-shrink-0" />
+                          <span className="text-sm text-rose-600">{error}</span>
+                        </div>
+                      )}
+
+                      <div className="flex gap-3">
+                        <button 
+                          onClick={handleRegisterDevice}
+                          disabled={isRegistering || !newDeviceName.trim()}
+                          className="flex-1 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isRegistering ? (
+                            <>
+                              <RefreshCw className="h-4 w-4 animate-spin" />
+                              Registering...
+                            </>
+                          ) : (
+                            <>
+                              <Plus className="h-4 w-4" />
+                              Register This Device
+                            </>
+                          )}
+                        </button>
+                        <button 
+                          onClick={handleCancelAddDevice}
+                          disabled={isRegistering}
+                          className="flex-1 py-3 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+
+                      <div className="mt-4 pt-4 border-t border-slate-200">
+                        <div className="flex items-start gap-2 text-xs text-slate-500">
+                          <Shield className="h-4 w-4 text-slate-400 mt-0.5 flex-shrink-0" />
+                          <p>
+                            This will register the current browser/device you're using right now. 
+                            You can manage device permissions and settings after registration.
+                          </p>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Verification Modal */}
+            {showVerificationModal && (
+              <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+                <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in duration-200">
+                  {/* Modal Header */}
+                  <div className="bg-gradient-to-r from-indigo-500 to-purple-600 p-6 text-white">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-xl font-bold flex items-center gap-2">
+                        <Shield className="h-6 w-6" />
+                        Verify Device
+                      </h3>
+                      <button
+                        onClick={handleCloseVerificationModal}
+                        className="p-1 hover:bg-white/20 rounded-lg transition-colors"
+                        disabled={isVerifying}
+                      >
+                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                    <p className="text-indigo-100 text-sm">
+                      Enter the 6-digit code from backend console
                     </p>
-                    <div className="flex items-center gap-2 mt-3 text-xs text-slate-500">
-                      <RefreshCw className="h-3 w-3 text-slate-400 animate-spin-slow" />
-                      Code expires in 10 minutes
+                  </div>
+
+                  {/* Modal Body */}
+                  <div className="p-6">
+                    <div className="mb-6">
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                        <div className="flex items-start gap-3">
+                          <div className="bg-blue-100 p-2 rounded-lg">
+                            <svg className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                          </div>
+                          <div className="flex-1">
+                            <p className="text-sm text-blue-800 font-medium">Check backend console</p>
+                            <p className="text-xs text-blue-600 mt-1">
+                              The verification code for "<strong>{verificationDeviceName}</strong>" was printed in the backend terminal. Look for: 🔑 VERIFICATION CODE
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <label className="block text-sm font-medium text-slate-700 mb-2">
+                        Verification Code
+                      </label>
+                      <input
+                        type="text"
+                        value={verificationCode}
+                        onChange={(e) => {
+                          // Only allow numbers and max 6 digits
+                          const value = e.target.value.replace(/\D/g, '').slice(0, 6);
+                          setVerificationCode(value);
+                          setVerificationError(null);
+                        }}
+                        placeholder="000000"
+                        maxLength={6}
+                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-center text-2xl font-bold tracking-widest"
+                        disabled={isVerifying}
+                        autoFocus
+                        onKeyPress={(e) => {
+                          if (e.key === 'Enter' && verificationCode.length === 6 && !isVerifying) {
+                            handleVerifyDevice();
+                          }
+                        }}
+                      />
+                      <p className="text-xs text-slate-500 mt-2 text-center">
+                        Enter the 6-digit code from the terminal
+                      </p>
+                    </div>
+
+                    {verificationError && (
+                      <div className={`mb-4 p-3 rounded-lg flex items-center gap-2 ${
+                        verificationError.includes('✓') || verificationError.includes('successfully')
+                          ? 'bg-green-50 border border-green-200'
+                          : 'bg-rose-50 border border-rose-200'
+                      }`}>
+                        {verificationError.includes('✓') || verificationError.includes('successfully') ? (
+                          <svg className="h-5 w-5 text-green-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : (
+                          <AlertCircle className="h-5 w-5 text-rose-500 flex-shrink-0" />
+                        )}
+                        <span className={`text-sm ${
+                          verificationError.includes('✓') || verificationError.includes('successfully')
+                            ? 'text-green-700'
+                            : 'text-rose-600'
+                        }`}>
+                          {verificationError}
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="space-y-3">
+                      <button
+                        onClick={handleVerifyDevice}
+                        disabled={isVerifying || verificationCode.length !== 6}
+                        className="w-full py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                      >
+                        {isVerifying ? (
+                          <>
+                            <RefreshCw className="h-5 w-5 animate-spin" />
+                            Verifying...
+                          </>
+                        ) : (
+                          <>
+                            <Shield className="h-5 w-5" />
+                            Verify Device
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        onClick={handleResendCode}
+                        disabled={isResendingCode || isVerifying}
+                        className="w-full py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isResendingCode ? 'Sending...' : 'Resend Code'}
+                      </button>
                     </div>
                   </div>
-                  <div className="flex gap-4">
-                    <button 
-                      className="flex-1 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-sm flex items-center justify-center gap-2"
-                    >
-                      <RefreshCw className="h-4 w-4" />
-                      Generate New Code
-                    </button>
-                    <button 
-                      className="flex-1 py-2.5 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors"
-                      onClick={() => setShowAddDevice(false)}
-                    >
-                      Cancel
-                    </button>
+
+                  {/* Modal Footer */}
+                  <div className="bg-slate-50 px-6 py-4 border-t border-slate-200">
+                    <p className="text-xs text-slate-500 text-center">
+                      Check your backend terminal for the verification code
+                    </p>
                   </div>
                 </div>
               </div>

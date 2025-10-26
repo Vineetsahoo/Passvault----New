@@ -3,6 +3,7 @@ import multer from 'multer';
 import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs/promises';
+import mongoose from 'mongoose';
 import SecureDocument from '../models/SecureDocument.js';
 import { authenticateToken } from '../middleware/auth.js';
 import logger from '../utils/logger.js';
@@ -12,7 +13,7 @@ const router = express.Router();
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
-    const userUploadDir = path.join('uploads', 'secure-documents', req.user.id);
+    const userUploadDir = path.join('uploads', 'secure-documents', req.user.userId);
     try {
       await fs.mkdir(userUploadDir, { recursive: true });
       cb(null, userUploadDir);
@@ -113,7 +114,7 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
 
     // Create document record
     const document = new SecureDocument({
-      userId: req.user.id,
+      userId: new mongoose.Types.ObjectId(req.user.userId), // Convert to ObjectId
       fileName: req.file.filename + '.enc',
       originalName: req.file.originalname,
       fileSize: req.file.size,
@@ -135,7 +136,7 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
     await document.save();
 
     // Update user storage stats
-    logger.info(`Document uploaded successfully by user ${req.user.id}`);
+    logger.info(`Document uploaded successfully by user ${req.user.userId}`);
 
     res.status(201).json({
       success: true,
@@ -169,8 +170,11 @@ router.get('/', authenticateToken, async (req, res) => {
   try {
     const { category, search, sortBy = '-createdAt', page = 1, limit = 20 } = req.query;
 
+    // Convert userId to ObjectId for proper comparison
+    const userObjectId = new mongoose.Types.ObjectId(req.user.userId);
+    
     const query = { 
-      userId: req.user.id,
+      userId: userObjectId, // Using ObjectId for comparison
       isArchived: false
     };
 
@@ -197,7 +201,7 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Calculate storage stats
     const stats = await SecureDocument.aggregate([
-      { $match: { userId: req.user.id, isArchived: false } },
+      { $match: { userId: userObjectId, isArchived: false } }, // Using ObjectId
       {
         $group: {
           _id: null,
@@ -236,7 +240,7 @@ router.get('/:id/download', authenticateToken, async (req, res) => {
   try {
     const document = await SecureDocument.findOne({
       _id: req.params.id,
-      userId: req.user.id
+      userId: new mongoose.Types.ObjectId(req.user.userId) // Convert to ObjectId
     });
 
     if (!document) {
@@ -293,7 +297,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   try {
     const document = await SecureDocument.findOne({
       _id: req.params.id,
-      userId: req.user.id
+      userId: new mongoose.Types.ObjectId(req.user.userId) // Convert to ObjectId
     });
 
     if (!document) {
@@ -339,7 +343,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
     const document = await SecureDocument.findOne({
       _id: req.params.id,
-      userId: req.user.id
+      userId: new mongoose.Types.ObjectId(req.user.userId) // Convert to ObjectId
     });
 
     if (!document) {
@@ -378,7 +382,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
 router.get('/stats/overview', authenticateToken, async (req, res) => {
   try {
     const stats = await SecureDocument.aggregate([
-      { $match: { userId: req.user.id } },
+      { $match: { userId: new mongoose.Types.ObjectId(req.user.userId) } }, // Convert to ObjectId
       {
         $facet: {
           totalStats: [
