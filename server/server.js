@@ -19,6 +19,9 @@ import alertsRoutes from './routes/alerts.js';
 import syncRoutes from './routes/sync.js';
 import backupsRoutes from './routes/backups.js';
 import storageRoutes from './routes/storage.js';
+import historyRoutes from './routes/history.js';
+import monitoringRoutes from './routes/monitoring.js';
+import transactionsRoutes from './routes/transactions.js';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler.js';
@@ -97,6 +100,9 @@ app.use('/api/alerts', alertsRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/backups', backupsRoutes);
 app.use('/api/storage', storageRoutes);
+app.use('/api/history', historyRoutes);
+app.use('/api/monitoring', monitoringRoutes);
+app.use('/api/transactions', transactionsRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {

@@ -133,7 +133,6 @@ const deviceSchema = new Schema({
 // Indexes for better query performance
 deviceSchema.index({ userId: 1, status: 1 });
 deviceSchema.index({ userId: 1, lastActiveAt: -1 });
-deviceSchema.index({ deviceId: 1 }, { unique: true });
 
 // Method to update last active time
 deviceSchema.methods.updateLastActive = function() {

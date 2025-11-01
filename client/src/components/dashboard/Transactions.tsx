@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   FaMoneyBillWave, FaSearch, FaFilter, FaArrowUp, FaArrowDown, 
   FaFileDownload, FaPlus, FaRegCalendarAlt, FaTags, FaRupeeSign,
   FaReceipt, FaCreditCard, FaCashRegister, FaRegClock,
-  FaChevronRight, FaTimes, FaFileExport, FaCopy
+  FaChevronRight, FaTimes, FaFileExport, FaCopy, FaSpinner,
+  FaExclamationTriangle
 } from 'react-icons/fa';
+import { transactionsAPI } from '../../services/api';
 
 interface Transaction {
   id: string;
@@ -16,21 +18,12 @@ interface Transaction {
 }
 
 const Transactions: React.FC = () => {
-  const [transactions, setTransactions] = useState<Transaction[]>([
-    { id: 'txn1', date: '2023-12-01', amount: 250.0, description: 'Payment received', category: 'credit' },
-    { id: 'txn2', date: '2023-12-02', amount: -75.5, description: 'Refund issued', category: 'refund' },
-    { id: 'txn3', date: '2023-12-03', amount: 120.0, description: 'Subscription charge', category: 'subscription' },
-    { id: 'txn4', date: '2023-12-04', amount: -50.0, description: 'Utility bill payment', category: 'debit' },
-    { id: 'txn5', date: '2023-12-05', amount: 1000.0, description: 'Salary credited', category: 'credit' },
-    { id: 'txn6', date: '2023-12-06', amount: -200.0, description: 'Online shopping purchase', category: 'debit' },
-    { id: 'txn7', date: '2023-12-07', amount: -30.0, description: 'Grocery debit', category: 'debit' },
-    { id: 'txn8', date: '2023-12-08', amount: 150.0, description: 'Bonus payment', category: 'credit' },
-    { id: 'txn9', date: '2023-12-09', amount: -15.0, description: 'Streaming service fee', category: 'subscription' },
-    { id: 'txn10', date: '2023-12-10', amount: -25.0, description: 'Refund adjustment', category: 'refund' },
-    { id: 'txn11', date: '2023-12-11', amount: 300.0, description: 'Freelance payment received', category: 'credit' },
-    { id: 'txn12', date: '2023-12-12', amount: -100.0, description: 'Transfer sent', category: 'debit' },
-    { id: 'txn13', date: '2023-12-13', amount: 20.0, description: 'Interest credited', category: 'credit' },
-  ]);
+  // API state management
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState<any>(null);
+
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'deposit' | 'withdrawal'>('all');
@@ -45,9 +38,75 @@ const Transactions: React.FC = () => {
   const [itemsPerPage] = useState(8);
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
 
-  const depositTotal = transactions.filter(txn => txn.amount > 0).reduce((sum, txn) => sum + txn.amount, 0);
-  const withdrawalTotal = transactions.filter(txn => txn.amount < 0).reduce((sum, txn) => sum + txn.amount, 0);
-  const totalAmount = transactions.reduce((sum, txn) => sum + txn.amount, 0);
+  // Fetch transactions from API
+  useEffect(() => {
+    fetchTransactions();
+  }, [filterType, filterCategory, sortOrder, currentPage]);
+
+  // Fetch stats from API
+  useEffect(() => {
+    fetchStats();
+  }, []);
+
+  const fetchTransactions = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const params: any = {
+        page: currentPage,
+        limit: itemsPerPage,
+        sort: sortOrder === 'newest' ? '-date' : 'date'
+      };
+
+      if (filterType !== 'all') {
+        params.type = filterType;
+      }
+
+      if (filterCategory !== 'all') {
+        params.category = filterCategory;
+      }
+
+      if (searchQuery) {
+        params.search = searchQuery;
+      }
+
+      const response = await transactionsAPI.getTransactions(params);
+      
+      // Map API response to component Transaction interface
+      if (response.data.success && response.data.data && response.data.data.transactions) {
+        const mappedTransactions = response.data.data.transactions.map((txn: any) => ({
+          id: txn._id,
+          date: txn.date,
+          amount: txn.amount,
+          description: txn.description,
+          category: txn.category
+        }));
+
+        setTransactions(mappedTransactions);
+      } else {
+        setTransactions([]);
+      }
+    } catch (err: any) {
+      console.error('Error fetching transactions:', err);
+      setError(err.message || 'Failed to load transactions');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchStats = async () => {
+    try {
+      const response = await transactionsAPI.getStats();
+      setStats(response.data);
+    } catch (err) {
+      console.error('Error fetching stats:', err);
+    }
+  };
+
+  const depositTotal = stats?.totalCredits || transactions.filter(txn => txn.amount > 0).reduce((sum, txn) => sum + txn.amount, 0);
+  const withdrawalTotal = stats?.totalDebits || transactions.filter(txn => txn.amount < 0).reduce((sum, txn) => sum + txn.amount, 0);
+  const totalAmount = stats?.netTotal || transactions.reduce((sum, txn) => sum + txn.amount, 0);
 
   const filteredTransactions = transactions.filter(txn => {
     const matchesSearch = txn.description.toLowerCase().includes(searchQuery.toLowerCase());
@@ -108,59 +167,76 @@ const Transactions: React.FC = () => {
 
   const paginate = (pageNumber: number) => setCurrentPage(pageNumber);
 
-  const handleExportData = () => {
+  const handleExportData = async () => {
     setExportStatus('exporting');
     
-    // Simulate export process
-    setTimeout(() => {
-      let dataToExport = sortedTransactions;
-      
-      // Apply date range filter
-      if (exportDateRange !== 'all') {
-        const now = new Date();
-        let cutoffDate = new Date();
-        
-        if (exportDateRange === 'current-month') {
-          cutoffDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        } else if (exportDateRange === 'last-3-months') {
-          cutoffDate.setMonth(now.getMonth() - 3);
-        } else if (exportDateRange === 'last-6-months') {
-          cutoffDate.setMonth(now.getMonth() - 6);
-        }
-        
-        dataToExport = dataToExport.filter(txn => new Date(txn.date) >= cutoffDate);
-      }
-
+    try {
+      // For CSV export, use the API
       if (exportFormat === 'csv') {
-        // Create CSV
-        const headers = ['Date', 'Description', 'Category', 'Amount'];
-        const csvContent = [
-          headers.join(','),
-          ...dataToExport.map(txn => 
-            `${txn.date},"${txn.description}",${txn.category || 'N/A'},${txn.amount}`
-          )
-        ].join('\n');
+        const filters: any = {};
         
-        const blob = new Blob([csvContent], { type: 'text/csv' });
+        // Apply date range filter
+        if (exportDateRange !== 'all') {
+          const now = new Date();
+          let startDate = new Date();
+          
+          if (exportDateRange === 'current-month') {
+            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+          } else if (exportDateRange === 'last-3-months') {
+            startDate.setMonth(now.getMonth() - 3);
+          } else if (exportDateRange === 'last-6-months') {
+            startDate.setMonth(now.getMonth() - 6);
+          }
+          
+          filters.startDate = startDate.toISOString().split('T')[0];
+          filters.endDate = now.toISOString().split('T')[0];
+        }
+
+        // Use the API to export CSV
+        const response = await transactionsAPI.exportCSV(filters);
+        
+        // Create blob from response and download
+        const blob = new Blob([response.data], { type: 'text/csv' });
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
         a.download = `transactions-${new Date().toISOString().split('T')[0]}.csv`;
         a.click();
         window.URL.revokeObjectURL(url);
-      } else if (exportFormat === 'json') {
-        // Create JSON
-        const jsonContent = JSON.stringify(dataToExport, null, 2);
-        const blob = new Blob([jsonContent], { type: 'application/json' });
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `transactions-${new Date().toISOString().split('T')[0]}.json`;
-        a.click();
-        window.URL.revokeObjectURL(url);
-      } else if (exportFormat === 'pdf') {
-        // For PDF, we'll just show a message (actual PDF generation would need a library)
-        console.log('PDF export would be generated here with a library like jsPDF');
+      } else {
+        // For JSON and PDF, use local data
+        let dataToExport = sortedTransactions;
+        
+        // Apply date range filter
+        if (exportDateRange !== 'all') {
+          const now = new Date();
+          let cutoffDate = new Date();
+          
+          if (exportDateRange === 'current-month') {
+            cutoffDate = new Date(now.getFullYear(), now.getMonth(), 1);
+          } else if (exportDateRange === 'last-3-months') {
+            cutoffDate.setMonth(now.getMonth() - 3);
+          } else if (exportDateRange === 'last-6-months') {
+            cutoffDate.setMonth(now.getMonth() - 6);
+          }
+          
+          dataToExport = dataToExport.filter(txn => new Date(txn.date) >= cutoffDate);
+        }
+
+        if (exportFormat === 'json') {
+          // Create JSON
+          const jsonContent = JSON.stringify(dataToExport, null, 2);
+          const blob = new Blob([jsonContent], { type: 'application/json' });
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `transactions-${new Date().toISOString().split('T')[0]}.json`;
+          a.click();
+          window.URL.revokeObjectURL(url);
+        } else if (exportFormat === 'pdf') {
+          // For PDF, we'll just show a message (actual PDF generation would need a library)
+          console.log('PDF export would be generated here with a library like jsPDF');
+        }
       }
       
       setExportStatus('completed');
@@ -170,13 +246,49 @@ const Transactions: React.FC = () => {
         setExportStatus('idle');
         setShowExportModal(false);
       }, 2000);
-    }, 1500);
-  };
-
-  const exportTransactions = () => {
+    } catch (err: any) {
+      console.error('Error exporting transactions:', err);
+      setExportStatus('idle');
+      alert('Failed to export transactions. Please try again.');
+    }
+  };  const exportTransactions = () => {
     setShowExportModal(true);
     setExportStatus('idle');
   };
+
+  // Show loading state
+  if (loading && transactions.length === 0) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+        <div className="text-center">
+          <FaSpinner className="w-16 h-16 animate-spin text-purple-500 mx-auto mb-4" />
+          <p className="text-xl text-gray-300">Loading transactions...</p>
+          <p className="text-sm text-gray-500 mt-2">Fetching your transaction data</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+        <div className="text-center max-w-md">
+          <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-8">
+            <FaExclamationTriangle className="w-16 h-16 text-red-500 mx-auto mb-4" />
+            <h3 className="text-2xl font-semibold text-red-400 mb-3">Error Loading Data</h3>
+            <p className="text-gray-400 mb-6">{error}</p>
+            <button
+              onClick={fetchTransactions}
+              className="px-6 py-3 bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors font-medium"
+            >
+              Try Again
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 -mt-4">

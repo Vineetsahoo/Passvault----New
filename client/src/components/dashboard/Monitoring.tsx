@@ -9,9 +9,10 @@ import {
   FaRocket, FaBug, FaFileAlt, FaHistory, FaMapMarkerAlt, FaFingerprint,
   FaRadiation, FaSkull, FaCrosshairs, FaFlag, FaBullseye, FaTimes,
   FaSort, FaPlus, FaCog, FaRegCheckCircle, FaRegCopy, FaDice, FaExpand,
-  FaNetworkWired, FaRegDotCircle, FaCircle, FaWaveSquare, FaArrowUp
+  FaNetworkWired, FaRegDotCircle, FaCircle, FaWaveSquare, FaArrowUp, FaSpinner
 } from 'react-icons/fa';
 import { FaShieldVirus, FaBinoculars, FaSignal } from 'react-icons/fa6';
+import { monitoringAPI } from '../../services/api';
 
 // New interfaces for real-time data visualization
 interface RealTimeMetric {
@@ -96,6 +97,15 @@ const Monitoring: React.FC = () => {
   const [showFullScanModal, setShowFullScanModal] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
+  
+  // API State
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [dashboardData, setDashboardData] = useState<any>(null);
+  const [securityData, setSecurityData] = useState<any>(null);
+  const [performanceData, setPerformanceData] = useState<any>(null);
+  const [alertsData, setAlertsData] = useState<any[]>([]);
+  
   const [scanResults, setScanResults] = useState<{
     scannedItems: number;
     threatsFound: number;
@@ -107,19 +117,94 @@ const Monitoring: React.FC = () => {
     vulnerabilities: 0,
     status: 'idle'
   });
+
+  // Fetch monitoring data from API
+  useEffect(() => {
+    fetchMonitoringData();
+    const interval = setInterval(fetchMonitoringData, 30000); // Refresh every 30 seconds
+    return () => clearInterval(interval);
+  }, [selectedTimeframe]);
+
+  const fetchMonitoringData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const [dashboardRes, securityRes, performanceRes, alertsRes] = await Promise.all([
+        monitoringAPI.getDashboard(
+          selectedTimeframe === '24h' ? 'today' : 
+          selectedTimeframe === '7d' ? 'week' : 
+          selectedTimeframe === '30d' ? 'month' : 
+          'week'
+        ),
+        monitoringAPI.getSecurity(),
+        monitoringAPI.getPerformance(),
+        monitoringAPI.getAlerts({ limit: 20 })
+      ]);
+
+      if (dashboardRes.data.success) {
+        setDashboardData(dashboardRes.data.data);
+      }
+      if (securityRes.data.success) {
+        setSecurityData(securityRes.data.data);
+      }
+      if (performanceRes.data.success) {
+        setPerformanceData(performanceRes.data.data);
+      }
+      if (alertsRes.data.success) {
+        // Convert API alerts to component format
+        const formattedAlerts = alertsRes.data.data.alerts.map((alert: any) => ({
+          id: alert.id,
+          severity: alert.severity,
+          type: alert.type,
+          title: alert.title,
+          description: alert.message,
+          affectedAccounts: [],
+          source: 'System Alert',
+          detectedAt: new Date(alert.timestamp).toLocaleString(),
+          status: 'active',
+          risk_score: alert.severity === 'critical' ? 90 : alert.severity === 'high' ? 70 : alert.severity === 'medium' ? 50 : 30,
+          recommendations: [alert.action || 'Review and take appropriate action']
+        }));
+        setAlertsData(formattedAlerts);
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch monitoring data:', err);
+      setError(err.response?.data?.message || 'Failed to load monitoring data');
+    } finally {
+      setLoading(false);
+    }
+  };
   
-  const [monitoringStats, setMonitoringStats] = useState<MonitoringStats>({
-    total_alerts: 23,
-    critical_alerts: 3,
-    monitored_accounts: 156,
-    dark_web_mentions: 7,
-    security_score: 87,
-    last_scan: '2 minutes ago',
-    threat_level: 'medium',
-    scanned_databases: 15420,
-    active_threats: 8,
-    resolved_threats: 145
-  });
+  const monitoringStats = useMemo(() => {
+    if (!dashboardData) {
+      return {
+        total_alerts: 0,
+        critical_alerts: 0,
+        monitored_accounts: 0,
+        dark_web_mentions: 0,
+        security_score: 0,
+        last_scan: 'Never',
+        threat_level: 'low' as const,
+        scanned_databases: 0,
+        active_threats: 0,
+        resolved_threats: 0
+      };
+    }
+
+    return {
+      total_alerts: dashboardData.overview?.totalPasswords + dashboardData.overview?.totalDocuments || 0,
+      critical_alerts: securityData?.metrics?.compromised || 0,
+      monitored_accounts: dashboardData.overview?.totalPasswords || 0,
+      dark_web_mentions: 0,
+      security_score: dashboardData.security?.score || 0,
+      last_scan: 'Just now',
+      threat_level: dashboardData.security?.score > 80 ? 'low' : dashboardData.security?.score > 60 ? 'medium' : 'high' as const,
+      scanned_databases: 15420,
+      active_threats: alertsData.filter((a: any) => a.status === 'active').length,
+      resolved_threats: alertsData.filter((a: any) => a.status === 'resolved').length
+    };
+  }, [dashboardData, securityData, alertsData]);
 
   // Real-time data visualization states
   const [realTimeMetrics, setRealTimeMetrics] = useState<RealTimeMetric[]>([]);
@@ -129,6 +214,17 @@ const Monitoring: React.FC = () => {
     score: 92,
     trend: 'up'
   });
+
+  // Update security score when data changes
+  useEffect(() => {
+    if (securityData?.securityScore !== undefined) {
+      setSecurityScore(prev => ({
+        timestamp: Date.now(),
+        score: securityData.securityScore,
+        trend: securityData.securityScore > prev.score ? 'up' : securityData.securityScore < prev.score ? 'down' : 'stable'
+      }));
+    }
+  }, [securityData]);
   const [liveMetrics, setLiveMetrics] = useState({
     threatsBlocked: 0,
     scanningRate: 0,
@@ -136,100 +232,37 @@ const Monitoring: React.FC = () => {
     cpuUsage: 0
   });
 
-  const [breachAlerts, setBreachAlerts] = useState<BreachAlert[]>([
-    {
-      id: 'br-001',
-      severity: 'critical',
-      type: 'data-breach',
-      title: 'Major Social Media Platform Breach',
-      description: 'Your email address was found in a recent data breach affecting 50M+ users from a popular social media platform. Immediate action required.',
-      affectedAccounts: ['user@example.com'],
-      source: 'HaveIBeenPwned API',
-      detectedAt: '5 minutes ago',
-      status: 'active',
-      risk_score: 95,
-      location: 'Russia',
-      recommendations: [
-        'Change password immediately for all associated accounts',
-        'Enable two-factor authentication if not already active',
-        'Monitor account for suspicious activity for the next 30 days',
-        'Consider freezing credit reports as a precaution'
-      ]
-    },
-    {
-      id: 'br-002',
-      severity: 'high',
-      type: 'dark-web',
-      title: 'Credentials Found on Dark Web Marketplace',
-      description: 'Your Netflix credentials were discovered being sold on a dark web marketplace. The credentials appear to be from a recent breach.',
-      affectedAccounts: ['netflix.account@example.com'],
-      source: 'Dark Web Scanner',
-      detectedAt: '2 hours ago',
-      status: 'investigating',
-      risk_score: 78,
-      recommendations: [
-        'Update Netflix password immediately',
-        'Check viewing history for unauthorized activity',
-        'Review all connected devices and remove unknown ones',
-        'Enable account notifications for login attempts'
-      ]
-    },
-    {
-      id: 'br-003',
-      severity: 'medium',
-      type: 'suspicious-login',
-      title: 'Unusual Login Location Detected',
-      description: 'A login to your work email was detected from Tokyo, Japan - an unusual location for your account activity.',
-      affectedAccounts: ['work@company.com'],
-      source: 'Login Monitoring',
-      detectedAt: '6 hours ago',
-      status: 'resolved',
-      risk_score: 45,
-      location: 'Tokyo, Japan',
-      ipAddress: '203.0.113.0',
-      userAgent: 'Chrome/119.0.0.0 (Windows NT 10.0)',
-      recommendations: [
-        'Verify if this login was legitimate',
-        'Enable location-based security alerts',
-        'Review recent account activity for any unauthorized changes'
-      ]
-    },
-    {
-      id: 'br-004',
-      severity: 'low',
-      type: 'phishing',
-      title: 'Phishing Email Attempt Blocked',
-      description: 'A sophisticated phishing email targeting your banking credentials was automatically blocked by our security systems.',
-      affectedAccounts: ['personal@example.com'],
-      source: 'Email Security Filter',
-      detectedAt: '1 day ago',
-      status: 'resolved',
-      risk_score: 25,
-      recommendations: [
-        'Be cautious of similar emails in the future',
-        'Always verify sender authenticity before clicking links',
-        'Report suspicious emails to your email provider'
-      ]
-    },
-    {
-      id: 'br-005',
-      severity: 'high',
-      type: 'malware',
-      title: 'Password Stealer Malware Detected',
-      description: 'Malware capable of stealing saved passwords was detected on a device that accessed your accounts.',
-      affectedAccounts: ['admin@company.com', 'personal@example.com'],
-      source: 'Endpoint Security',
-      detectedAt: '3 hours ago',
-      status: 'active',
-      risk_score: 82,
-      recommendations: [
-        'Run full antivirus scan on all devices',
-        'Change passwords for all critical accounts',
-        'Enable additional security monitoring',
-        'Consider using hardware security keys'
-      ]
+  const breachAlerts = useMemo(() => {
+    // Combine static alerts with API alerts
+    const staticAlerts: BreachAlert[] = [
+      {
+        id: 'br-001',
+        severity: 'critical',
+        type: 'data-breach',
+        title: 'Major Social Media Platform Breach',
+        description: 'Your email address was found in a recent data breach affecting 50M+ users from a popular social media platform. Immediate action required.',
+        affectedAccounts: ['user@example.com'],
+        source: 'HaveIBeenPwned API',
+        detectedAt: '5 minutes ago',
+        status: 'active',
+        risk_score: 95,
+        location: 'Russia',
+        recommendations: [
+          'Change password immediately for all associated accounts',
+          'Enable two-factor authentication if not already active',
+          'Monitor account for suspicious activity for the next 30 days',
+          'Consider freezing credit reports as a precaution'
+        ]
+      }
+    ];
+
+    // Add API alerts if available
+    if (alertsData.length > 0) {
+      return [...alertsData, ...staticAlerts];
     }
-  ]);
+    
+    return staticAlerts;
+  }, [alertsData]);
 
   const categories = ['all', 'data-breach', 'dark-web', 'suspicious-login', 'phishing', 'malware'];
 
@@ -270,41 +303,13 @@ const Monitoring: React.FC = () => {
     }, 500);
   };
 
-  // Real-time monitoring simulation
+  // Real-time monitoring - refresh data periodically
   useEffect(() => {
     if (!isRealTimeEnabled) return;
 
     const interval = setInterval(() => {
-      if (Math.random() < 0.08) { // 8% chance every 10 seconds
-        const severities: Array<'critical' | 'high' | 'medium' | 'low'> = ['critical', 'high', 'medium', 'low'];
-        const types: Array<'data-breach' | 'suspicious-login' | 'dark-web' | 'phishing' | 'malware'> = ['data-breach', 'suspicious-login', 'dark-web', 'phishing', 'malware'];
-        
-        const randomSeverity = severities[Math.floor(Math.random() * severities.length)];
-        const randomType = types[Math.floor(Math.random() * types.length)];
-        
-        const newAlert: BreachAlert = {
-          id: `br-${Date.now()}`,
-          severity: randomSeverity,
-          type: randomType,
-          title: `New ${randomType.replace('-', ' ')} Event Detected`,
-          description: `Real-time monitoring has detected a new ${randomType.replace('-', ' ')} event that requires your attention.`,
-          affectedAccounts: ['monitored@example.com'],
-          source: 'Real-time Scanner',
-          detectedAt: 'Just now',
-          status: 'active',
-          risk_score: Math.floor(Math.random() * 100),
-          recommendations: ['Investigate immediately', 'Take preventive action', 'Monitor for additional threats']
-        };
-
-        setBreachAlerts(prev => [newAlert, ...prev].slice(0, 10));
-        setMonitoringStats(prev => ({
-          ...prev,
-          total_alerts: prev.total_alerts + 1,
-          critical_alerts: randomSeverity === 'critical' ? prev.critical_alerts + 1 : prev.critical_alerts,
-          last_scan: 'Just now'
-        }));
-      }
-    }, 10000);
+      fetchMonitoringData();
+    }, 60000); // Refresh every minute
 
     return () => clearInterval(interval);
   }, [isRealTimeEnabled]);
@@ -419,16 +424,16 @@ const Monitoring: React.FC = () => {
       .filter(alert => {
         const matchesCategory = selectedCategory === 'all' || alert.type === selectedCategory;
         const matchesSeverity = selectedSeverity === 'all' || alert.severity === selectedSeverity;
-        const matchesSearch = searchQuery === '' || 
+        const matchesSearch: boolean = searchQuery === '' || 
           alert.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
           alert.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          alert.affectedAccounts.some(account => account.toLowerCase().includes(searchQuery.toLowerCase()));
+          alert.affectedAccounts.some((account: string) => account.toLowerCase().includes(searchQuery.toLowerCase()));
         
         return matchesCategory && matchesSeverity && matchesSearch;
       })
       .sort((a, b) => {
         if (sortBy === 'severity') {
-          const severityOrder = { 'critical': 4, 'high': 3, 'medium': 2, 'low': 1 };
+          const severityOrder: Record<string, number> = { 'critical': 4, 'high': 3, 'medium': 2, 'low': 1 };
           return severityOrder[b.severity] - severityOrder[a.severity];
         }
         if (sortBy === 'risk_score') {
@@ -465,6 +470,40 @@ const Monitoring: React.FC = () => {
       }
     }
   };
+
+  // Show loading state
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+        <div className="text-center">
+          <FaSpinner className="w-16 h-16 animate-spin text-purple-500 mx-auto mb-4" />
+          <p className="text-xl text-gray-300">Loading monitoring data...</p>
+          <p className="text-sm text-gray-500 mt-2">Please wait while we fetch your security information</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+        <div className="text-center max-w-md">
+          <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-8">
+            <FaExclamationTriangle className="w-16 h-16 text-red-500 mx-auto mb-4" />
+            <h3 className="text-2xl font-semibold text-red-400 mb-3">Error Loading Data</h3>
+            <p className="text-gray-400 mb-6">{error}</p>
+            <button
+              onClick={fetchMonitoringData}
+              className="px-6 py-3 bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors font-medium"
+            >
+              Try Again
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 -mt-4">
@@ -909,7 +948,7 @@ const Monitoring: React.FC = () => {
                       <div className="p-3 bg-gray-50 rounded-lg">
                         <div className="text-xs text-gray-500 mb-1">Affected Accounts</div>
                         <div className="space-y-1">
-                          {alert.affectedAccounts.slice(0, 2).map((account, index) => (
+                          {alert.affectedAccounts.slice(0, 2).map((account: string, index: number) => (
                             <div key={index} className="flex items-center justify-between">
                               <span className="font-mono text-xs text-gray-700 truncate flex-1 mr-2">{account}</span>
                               <motion.button 
@@ -1030,7 +1069,7 @@ const Monitoring: React.FC = () => {
                         <div>
                           <h5 className="font-medium text-gray-800 mb-3">Affected Accounts</h5>
                           <div className="space-y-2">
-                            {alert.affectedAccounts.map((account, index) => (
+                            {alert.affectedAccounts.map((account: string, index: number) => (
                               <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                                 <span className="font-mono text-gray-700">{account}</span>
                                 <motion.button 
@@ -1049,7 +1088,7 @@ const Monitoring: React.FC = () => {
                         <div>
                           <h5 className="font-medium text-gray-800 mb-3">Recommended Actions</h5>
                           <div className="space-y-3">
-                            {alert.recommendations.map((rec, index) => (
+                            {alert.recommendations.map((rec: string, index: number) => (
                               <div key={index} className="flex items-start gap-3 p-3 bg-blue-50 rounded-lg">
                                 <div className="p-1.5 bg-blue-100 rounded-full text-blue-600 mt-0.5">
                                   <FaBullseye className="w-3 h-3" />

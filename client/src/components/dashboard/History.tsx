@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   FaPassport, FaIdCard, FaCreditCard, FaFingerprint, 
@@ -8,33 +8,46 @@ import {
   FaExclamationCircle, FaChevronDown, FaEye,
   FaClock, FaLock, FaAngleRight, FaInfoCircle,
   FaTimes, FaBell, FaKey, FaShieldVirus, FaSave,
-  FaToggleOn, FaToggleOff, FaExclamation
+  FaToggleOn, FaToggleOff, FaExclamation, FaSpinner
 } from 'react-icons/fa';
+import { historyAPI } from '../../services/api';
 
 interface HistoryEvent {
   id: string;
   date: string;
-  eventType: 'identity_access' | 'payment_auth' | 'document_view' | 'credential_update' | 
-            'security_check' | 'vault_access' | 'export_data' | 'share_credential';
+  eventType: 'password' | 'document' | 'qrcode' | 'backup' | 'login' | 'settings';
   description: string;
   target: string;
-  passType: 'identity' | 'payment' | 'document' | 'license' | 'credential';
-  severity?: 'low' | 'medium' | 'high';
-  location?: string;
-  deviceInfo?: string;
+  action: string;
+  metadata?: any;
   ipAddress?: string;
+  deviceInfo?: string;
+  location?: string;
   success: boolean;
-  userAction?: string;
 }
 
 const History: React.FC = () => {
   const [filter, setFilter] = useState<string>('all');
-  const [sortBy, setSortBy] = useState<'newest' | 'severity'>('newest');
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest'>('newest');
   const [searchTerm, setSearchTerm] = useState('');
   const [showDetailId, setShowDetailId] = useState<string | null>(null);
   const [activeFiltersCount, setActiveFiltersCount] = useState<number>(0);
   const [showFilters, setShowFilters] = useState<boolean>(false);
   const [showSecuritySettings, setShowSecuritySettings] = useState<boolean>(false);
+  
+  // API State
+  const [historyEvents, setHistoryEvents] = useState<HistoryEvent[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState<any>(null);
+  const [pagination, setPagination] = useState({
+    currentPage: 1,
+    totalPages: 1,
+    totalItems: 0,
+    hasNextPage: false,
+  });
+  const [page, setPage] = useState(1);
+  const limit = 20;
   
   // Security Settings States
   const [securitySettings, setSecuritySettings] = useState({
@@ -51,6 +64,59 @@ const History: React.FC = () => {
   });
   
   const [settingsChanged, setSettingsChanged] = useState(false);
+
+  // Fetch history data from API
+  useEffect(() => {
+    fetchHistory();
+    fetchStats();
+  }, [page, filter, sortBy]);
+
+  const fetchHistory = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const response = await historyAPI.getHistory({
+        page,
+        limit,
+        type: filter !== 'all' ? filter : undefined,
+        sortBy: sortBy === 'newest' ? '-createdAt' : 'createdAt'
+      });
+
+      if (response.data.success) {
+        const formattedEvents = response.data.data.history.map((item: any) => ({
+          id: item._id,
+          date: item.timestamp || item.createdAt,
+          eventType: item.type,
+          description: item.description || `${item.action} ${item.type}`,
+          target: item.target || item.title || 'Unknown',
+          action: item.action,
+          metadata: item.metadata,
+          ipAddress: item.ipAddress,
+          success: true
+        }));
+        
+        setHistoryEvents(formattedEvents);
+        setPagination(response.data.data.pagination);
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch history:', err);
+      setError(err.response?.data?.message || 'Failed to load history');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchStats = async () => {
+    try {
+      const response = await historyAPI.getStats();
+      if (response.data.success) {
+        setStats(response.data.data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch stats:', err);
+    }
+  };
 
   const handleSettingToggle = (setting: keyof typeof securitySettings) => {
     setSecuritySettings(prev => ({
@@ -76,75 +142,31 @@ const History: React.FC = () => {
     alert('Security settings saved successfully!');
   };
 
-  const historyEvents: HistoryEvent[] = [
-    {
-      id: '1',
-      date: '2023-12-04 14:30',
-      eventType: 'identity_access',
-      description: 'Passport credentials accessed',
-      target: 'US Passport',
-      passType: 'identity',
-      severity: 'high',
-      deviceInfo: 'Chrome / Windows 10',
-      ipAddress: '192.168.1.1',
-      success: true,
-      userAction: 'View'
-    },
-    {
-      id: '2',
-      date: '2023-12-04 12:15',
-      eventType: 'payment_auth',
-      description: 'Credit card PIN verified',
-      target: 'Visa ending in 4321',
-      passType: 'payment',
-      severity: 'high',
-      location: 'Online Purchase',
-      ipAddress: '10.0.0.1',
-      success: true,
-      userAction: 'Authorize'
-    },
-    {
-      id: '3',
-      date: '2023-12-03 18:45',
-      eventType: 'document_view',
-      description: 'Social Security card accessed',
-      target: 'SSN Document',
-      passType: 'document',
-      deviceInfo: 'iPhone 13',
-      severity: 'high',
-      success: true,
-      userAction: 'View'
-    },
-    {
-      id: '4',
-      date: '2023-12-03 15:20',
-      eventType: 'credential_update',
-      description: 'Driver License information updated',
-      target: 'State DL',
-      passType: 'license',
-      severity: 'medium',
-      success: true,
-      userAction: 'Update'
-    }
-  ];
+  const handleLoadMore = () => {
+    setPage(prev => prev + 1);
+  };
 
-  const getEventIcon = (eventType: string, passType: string) => {
-    switch (passType) {
-      case 'identity': 
+  const getEventIcon = (eventType: string) => {
+    switch (eventType) {
+      case 'password': 
         return <div className="p-2.5 bg-blue-100 rounded-full">
-          <FaPassport className="text-blue-600 w-5 h-5" />
-        </div>;
-      case 'payment': 
-        return <div className="p-2.5 bg-green-100 rounded-full">
-          <FaCreditCard className="text-green-600 w-5 h-5" />
+          <FaKey className="text-blue-600 w-5 h-5" />
         </div>;
       case 'document': 
         return <div className="p-2.5 bg-orange-100 rounded-full">
           <FaFileAlt className="text-orange-600 w-5 h-5" />
         </div>;
-      case 'license': 
+      case 'qrcode': 
         return <div className="p-2.5 bg-purple-100 rounded-full">
-          <FaIdCard className="text-purple-600 w-5 h-5" />
+          <FaCreditCard className="text-purple-600 w-5 h-5" />
+        </div>;
+      case 'backup': 
+        return <div className="p-2.5 bg-green-100 rounded-full">
+          <FaShieldAlt className="text-green-600 w-5 h-5" />
+        </div>;
+      case 'login': 
+        return <div className="p-2.5 bg-indigo-100 rounded-full">
+          <FaPassport className="text-indigo-600 w-5 h-5" />
         </div>;
       default: 
         return <div className="p-2.5 bg-gray-100 rounded-full">
@@ -153,11 +175,11 @@ const History: React.FC = () => {
     }
   };
 
-  const getSeverityColor = (severity?: string) => {
-    switch (severity) {
-      case 'high': return 'text-red-600 bg-red-50 border border-red-100';
-      case 'medium': return 'text-yellow-600 bg-yellow-50 border border-yellow-100';
-      case 'low': return 'text-green-600 bg-green-50 border border-green-100';
+  const getSeverityColor = (action: string) => {
+    switch (action) {
+      case 'deleted': return 'text-red-600 bg-red-50 border border-red-100';
+      case 'updated': return 'text-yellow-600 bg-yellow-50 border border-yellow-100';
+      case 'created': return 'text-green-600 bg-green-50 border border-green-100';
       default: return 'text-gray-600 bg-gray-50 border border-gray-200';
     }
   };
@@ -188,25 +210,20 @@ const History: React.FC = () => {
 
   const eventTypes = [
     { id: 'all', label: 'All Activities', icon: FaShieldAlt },
-    { id: 'identity_access', label: 'Identity Access', icon: FaPassport },
-    { id: 'payment_auth', label: 'Payment Auth', icon: FaCreditCard },
-    { id: 'document_view', label: 'Document View', icon: FaFileAlt },
-    { id: 'credential_update', label: 'Credential Update', icon: FaUserShield }
+    { id: 'password', label: 'Passwords', icon: FaKey },
+    { id: 'document', label: 'Documents', icon: FaFileAlt },
+    { id: 'qrcode', label: 'QR Codes', icon: FaCreditCard },
+    { id: 'backup', label: 'Backups', icon: FaShieldVirus },
+    { id: 'login', label: 'Logins', icon: FaUserShield }
   ];
 
-  const filteredEvents = historyEvents
-    .filter(event => {
-      if (filter !== 'all' && event.eventType !== filter) return false;
-      if (searchTerm && !event.description.toLowerCase().includes(searchTerm.toLowerCase())) return false;
-      return true;
-    })
-    .sort((a, b) => {
-      if (sortBy === 'severity') {
-        const severityOrder = { high: 0, medium: 1, low: 2, undefined: 3 };
-        return (severityOrder[a.severity || 'undefined'] - severityOrder[b.severity || 'undefined']);
-      }
-      return new Date(b.date).getTime() - new Date(a.date).getTime();
-    });
+  const filteredEvents = historyEvents.filter(event => {
+    if (searchTerm && !event.description.toLowerCase().includes(searchTerm.toLowerCase()) && 
+        !event.target.toLowerCase().includes(searchTerm.toLowerCase())) {
+      return false;
+    }
+    return true;
+  });
 
   // Animation variants
   const cardVariants = {
@@ -289,8 +306,14 @@ const History: React.FC = () => {
             </div>
             <div className="flex items-center gap-2 bg-white/10 backdrop-blur-sm px-3 py-1.5 rounded-full">
               <FaInfoCircle className="text-blue-200" size={12} />
-              <span className="text-xs text-blue-50">{historyEvents.length} events recorded</span>
+              <span className="text-xs text-blue-50">{pagination.totalItems} events recorded</span>
             </div>
+            {stats && (
+              <div className="flex items-center gap-2 bg-white/10 backdrop-blur-sm px-3 py-1.5 rounded-full">
+                <FaShieldAlt className="text-blue-200" size={12} />
+                <span className="text-xs text-blue-50">{stats.totalActivities} total activities</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -317,11 +340,11 @@ const History: React.FC = () => {
                 <FaSort className="text-gray-500" />
                 <select 
                   value={sortBy} 
-                  onChange={(e) => setSortBy(e.target.value as 'newest' | 'severity')}
+                  onChange={(e) => setSortBy(e.target.value as 'newest' | 'oldest')}
                   className="bg-transparent border-none text-sm focus:ring-0 text-gray-700 font-medium"
                 >
                   <option value="newest">Sort: Newest first</option>
-                  <option value="severity">Sort: Severity</option>
+                  <option value="oldest">Sort: Oldest first</option>
                 </select>
               </div>
               
@@ -454,7 +477,24 @@ const History: React.FC = () => {
         </div>
       </div>
 
-      {filteredEvents.length === 0 ? (
+      {loading && page === 1 ? (
+        <div className="bg-white rounded-xl shadow-sm p-12 text-center">
+          <FaSpinner className="animate-spin text-indigo-600 text-4xl mx-auto mb-4" />
+          <p className="text-gray-600">Loading history...</p>
+        </div>
+      ) : error ? (
+        <div className="bg-white rounded-xl shadow-sm p-12 text-center">
+          <FaExclamationCircle className="text-red-500 text-4xl mx-auto mb-4" />
+          <h3 className="text-xl font-semibold text-gray-800 mb-2">Error Loading History</h3>
+          <p className="text-gray-600 mb-4">{error}</p>
+          <button 
+            onClick={() => fetchHistory()}
+            className="px-5 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+          >
+            Try Again
+          </button>
+        </div>
+      ) : filteredEvents.length === 0 ? (
         <motion.div 
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -490,12 +530,12 @@ const History: React.FC = () => {
             >
               <div className="flex">
                 <div className={`w-1 ${
-                  event.severity === 'high' ? 'bg-red-500' : 
-                  event.severity === 'medium' ? 'bg-amber-500' :
-                  event.passType === 'identity' ? 'bg-blue-500' : 
-                  event.passType === 'payment' ? 'bg-green-500' :
-                  event.passType === 'document' ? 'bg-orange-500' :
-                  'bg-purple-500'
+                  event.action === 'deleted' ? 'bg-red-500' : 
+                  event.action === 'updated' ? 'bg-amber-500' :
+                  event.eventType === 'password' ? 'bg-blue-500' : 
+                  event.eventType === 'document' ? 'bg-orange-500' :
+                  event.eventType === 'qrcode' ? 'bg-purple-500' :
+                  'bg-green-500'
                 }`}></div>
                 
                 <div className="flex-1">
@@ -503,7 +543,7 @@ const History: React.FC = () => {
                     <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
                       <div className="flex gap-4">
                         <div className="flex-shrink-0 mt-1">
-                          {getEventIcon(event.eventType, event.passType)}
+                          {getEventIcon(event.eventType)}
                         </div>
                         
                         <div>
@@ -512,9 +552,9 @@ const History: React.FC = () => {
                               {formatDate(event.date)}
                             </span>
                             
-                            {event.severity && (
-                              <span className={`px-2 py-1 rounded-md text-xs font-medium ${getSeverityColor(event.severity)}`}>
-                                {event.severity.charAt(0).toUpperCase() + event.severity.slice(1)} risk
+                            {event.action && (
+                              <span className={`px-2 py-1 rounded-md text-xs font-medium ${getSeverityColor(event.action)}`}>
+                                {event.action.charAt(0).toUpperCase() + event.action.slice(1)}
                               </span>
                             )}
                             
@@ -525,10 +565,10 @@ const History: React.FC = () => {
                           <p className="text-gray-600 mt-1">{event.target}</p>
                           
                           <div className="mt-4 flex flex-wrap items-center gap-3">
-                            {event.deviceInfo && (
+                            {event.metadata?.device && (
                               <div className="flex items-center gap-1.5 text-sm text-gray-500 bg-gray-50 px-2.5 py-1 rounded-md">
                                 <FaDesktop className="text-gray-400" size={12} />
-                                {event.deviceInfo}
+                                {event.metadata.device}
                               </div>
                             )}
                             
@@ -539,18 +579,16 @@ const History: React.FC = () => {
                               </div>
                             )}
                             
-                            {event.location && (
+                            {event.metadata?.location && (
                               <div className="flex items-center gap-1.5 text-sm text-gray-500 bg-gray-50 px-2.5 py-1 rounded-md">
                                 <FaCalendarAlt className="text-gray-400" size={12} />
-                                {event.location}
+                                {event.metadata.location}
                               </div>
                             )}
                             
-                            {event.userAction && (
-                              <div className="flex items-center gap-1.5 text-sm font-medium text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-100">
-                                Action: {event.userAction}
-                              </div>
-                            )}
+                            <div className="flex items-center gap-1.5 text-sm font-medium text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-100">
+                              Type: {event.eventType}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -589,9 +627,9 @@ const History: React.FC = () => {
                               <dt className="text-gray-500 font-medium">Event ID:</dt>
                               <dd className="font-mono bg-gray-50 px-2 py-0.5 rounded text-gray-800">{event.id}</dd>
                               <dt className="text-gray-500 font-medium">Event Type:</dt>
-                              <dd className="capitalize">{event.eventType.replace('_', ' ')}</dd>
-                              <dt className="text-gray-500 font-medium">Pass Type:</dt>
-                              <dd className="capitalize">{event.passType}</dd>
+                              <dd className="capitalize">{event.eventType}</dd>
+                              <dt className="text-gray-500 font-medium">Action:</dt>
+                              <dd className="capitalize">{event.action}</dd>
                               <dt className="text-gray-500 font-medium">Date & Time:</dt>
                               <dd>{event.date}</dd>
                             </dl>
@@ -603,27 +641,27 @@ const History: React.FC = () => {
                               Access Information
                             </h4>
                             <dl className="grid grid-cols-2 gap-y-2 text-sm">
-                              {event.deviceInfo && (
-                                <>
+                              {event.metadata?.device && (
+                                <React.Fragment key="device">
                                   <dt className="text-gray-500 font-medium">Device:</dt>
-                                  <dd>{event.deviceInfo}</dd>
-                                </>
+                                  <dd>{event.metadata.device}</dd>
+                                </React.Fragment>
                               )}
                               {event.ipAddress && (
-                                <>
+                                <React.Fragment key="ip">
                                   <dt className="text-gray-500 font-medium">IP Address:</dt>
                                   <dd className="font-mono bg-gray-50 px-2 py-0.5 rounded">{event.ipAddress}</dd>
-                                </>
+                                </React.Fragment>
                               )}
-                              {event.location && (
-                                <>
+                              {event.metadata?.location && (
+                                <React.Fragment key="location">
                                   <dt className="text-gray-500 font-medium">Location:</dt>
-                                  <dd>{event.location}</dd>
-                                </>
+                                  <dd>{event.metadata.location}</dd>
+                                </React.Fragment>
                               )}
                               <dt className="text-gray-500 font-medium">Status:</dt>
                               <dd className={event.success ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
-                                {event.success ? 'Successful' : 'Failed'} authentication
+                                {event.success ? 'Successful' : 'Failed'} action
                               </dd>
                             </dl>
                           </div>
@@ -643,11 +681,24 @@ const History: React.FC = () => {
             </motion.div>
           ))}
           
-          {filteredEvents.length > 0 && (
+          {filteredEvents.length > 0 && pagination.hasNextPage && (
             <div className="flex justify-center mt-8">
-              <button className="px-6 py-3 bg-white border border-gray-200 rounded-lg shadow-sm hover:bg-gray-50 text-gray-600 font-medium flex items-center gap-2">
-                <FaHistory className="text-gray-400" />
-                Load more activity
+              <button 
+                onClick={handleLoadMore}
+                disabled={loading}
+                className="px-6 py-3 bg-white border border-gray-200 rounded-lg shadow-sm hover:bg-gray-50 text-gray-600 font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? (
+                  <>
+                    <FaSpinner className="text-gray-400 animate-spin" />
+                    Loading...
+                  </>
+                ) : (
+                  <>
+                    <FaHistory className="text-gray-400" />
+                    Load more activity
+                  </>
+                )}
               </button>
             </div>
           )}
