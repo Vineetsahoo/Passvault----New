@@ -22,6 +22,7 @@ import storageRoutes from './routes/storage.js';
 import historyRoutes from './routes/history.js';
 import monitoringRoutes from './routes/monitoring.js';
 import transactionsRoutes from './routes/transactions.js';
+import sharingRoutes from './routes/sharing.js';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler.js';
@@ -103,6 +104,7 @@ app.use('/api/storage', storageRoutes);
 app.use('/api/history', historyRoutes);
 app.use('/api/monitoring', monitoringRoutes);
 app.use('/api/transactions', transactionsRoutes);
+app.use('/api/sharing', sharingRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {

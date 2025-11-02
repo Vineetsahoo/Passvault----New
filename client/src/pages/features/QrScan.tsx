@@ -2,7 +2,7 @@
 import { QrCode, Camera, Settings, History, CheckCircle2, XCircle, Image, 
          RotateCcw, Layers, ZoomIn, ZoomOut, Lightbulb, Filter, Share2, 
          CreditCard, ChevronLeft, ChevronRight, ArrowUpCircle, Lock, LogIn, Trash2, AlertCircle, ArrowLeft,
-         Plus, Edit3, Save, Download, Eye, EyeOff, Palette, Type, Calendar, User, Building, Check, Share, Loader2 } from 'lucide-react';
+         Plus, Edit3, Save, Download, Eye, EyeOff, Palette, Type, Calendar, User, Building, Check, Share, Loader2, Info } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react'; 
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -284,6 +284,24 @@ const ManualEntryForm: React.FC<{
             </button>
           ))}
         </div>
+        
+        {/* Input Requirements Info */}
+        <div className="mt-3 p-3 bg-blue-50 border border-blue-100 rounded-lg">
+          <div className="flex items-start gap-2">
+            <Info className="h-4 w-4 text-blue-600 flex-shrink-0 mt-0.5" />
+            <div className="text-sm text-blue-800">
+              {formData.type === 'credit' || formData.type === 'debit' ? (
+                <>
+                  <strong>Card Number:</strong> 13-16 digits only • Auto-formatted with spaces • Test/demo cards accepted
+                </>
+              ) : (
+                <>
+                  <strong>Pass/Membership ID:</strong> Alphanumeric characters allowed • Min 3 characters
+                </>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Basic Information */}
@@ -303,15 +321,25 @@ const ManualEntryForm: React.FC<{
 
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-2">
-            Card Number/ID <span className="text-red-500">*</span>
+            {formData.type === 'credit' || formData.type === 'debit' ? 'Card Number' : 'Pass/Membership ID'} <span className="text-red-500">*</span>
           </label>
           <input
             type="text"
             value={formData.number}
             onChange={(e) => onFormChange('number', e.target.value)}
-            placeholder="**** **** **** 1234"
-            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            placeholder={
+              formData.type === 'credit' || formData.type === 'debit' 
+                ? '1234 5678 9012 3456' 
+                : 'ABC-123-XYZ'
+            }
+            maxLength={formData.type === 'credit' || formData.type === 'debit' ? 19 : 50}
+            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 font-mono"
           />
+          <p className="text-xs text-slate-500 mt-1">
+            {formData.type === 'credit' || formData.type === 'debit' 
+              ? '13-16 digits, auto-formatted with spaces' 
+              : 'Alphanumeric characters allowed'}
+          </p>
         </div>
 
         <div>
@@ -342,15 +370,19 @@ const ManualEntryForm: React.FC<{
 
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-2">
-            Expiry Date
+            Expiry Date {(formData.type === 'credit' || formData.type === 'debit') && <span className="text-amber-500">(Recommended)</span>}
           </label>
           <input
             type="text"
             value={formData.expiryDate}
             onChange={(e) => onFormChange('expiryDate', e.target.value)}
             placeholder="MM/YY"
-            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            maxLength={5}
+            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 font-mono"
           />
+          <p className="text-xs text-slate-500 mt-1">
+            Format: MM/YY (e.g., 12/25)
+          </p>
         </div>
 
         <div>
@@ -415,9 +447,16 @@ const ManualEntryForm: React.FC<{
       {/* Validation Errors */}
       {validationErrors.length > 0 && (
         <div className="bg-red-50 border-l-4 border-red-400 rounded-lg p-4">
-          <div className="flex items-center gap-2 text-red-700">
-            <AlertCircle className="h-5 w-5" />
-            <span className="font-medium">{validationErrors[0]}</span>
+          <div className="flex items-start gap-3">
+            <AlertCircle className="h-5 w-5 text-red-700 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <h4 className="font-medium text-red-700 mb-2">Please fix the following errors:</h4>
+              <ul className="list-disc list-inside space-y-1 text-sm text-red-600">
+                {validationErrors.map((error, index) => (
+                  <li key={index}>{error}</li>
+                ))}
+              </ul>
+            </div>
           </div>
         </div>
       )}
@@ -517,10 +556,20 @@ const QrScan = () => {
     
     console.log('🔐 Auth check:', { hasToken: !!token, isAuthFlag, isAuthenticated });
     
+    const user = userData ? JSON.parse(userData) : null;
+    
     setAuth({
       isAuthenticated,
-      user: userData ? JSON.parse(userData) : null
+      user
     });
+    
+    // Auto-fill holder name with logged-in user's name
+    if (isAuthenticated && user?.name) {
+      setFormData(prev => ({
+        ...prev,
+        holderName: user.name
+      }));
+    }
     
     // Clear cards if not authenticated
     if (!isAuthenticated) {
@@ -728,12 +777,152 @@ const QrScan = () => {
     return JSON.stringify(qrData);
   };
 
-  // Handle form changes
-  const handleFormChange = (field: keyof NewCardForm, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+  // Format card number with spaces every 4 digits
+  const formatCardNumber = (value: string, type: 'credit' | 'debit' | 'pass' | 'membership'): string => {
+    // For credit/debit cards - only numbers with auto-spacing
+    if (type === 'credit' || type === 'debit') {
+      // Remove all non-numeric characters
+      const numbers = value.replace(/\D/g, '');
+      
+      // Limit to 16 digits (standard card length)
+      const limited = numbers.slice(0, 16);
+      
+      // Add space after every 4 digits
+      const formatted = limited.match(/.{1,4}/g)?.join(' ') || limited;
+      
+      return formatted;
+    }
+    
+    // For pass/membership - allow alphanumeric
+    return value.slice(0, 50); // Limit length
   };
 
-  // Save new card/pass
+  // Validate card number based on type
+  const validateCardNumber = (number: string, type: 'credit' | 'debit' | 'pass' | 'membership'): string | null => {
+    if (!number || number.trim() === '') {
+      return 'Card/Pass number is required';
+    }
+
+    if (type === 'credit' || type === 'debit') {
+      // Remove spaces for validation
+      const digits = number.replace(/\s/g, '');
+      
+      // Check if only contains numbers
+      if (!/^\d+$/.test(digits)) {
+        return 'Card number must contain only digits';
+      }
+      
+      // Check minimum length (13 digits for some cards, 16 for most)
+      if (digits.length < 13) {
+        return 'Card number must be at least 13 digits';
+      }
+      
+      // Check maximum length
+      if (digits.length > 16) {
+        return 'Card number cannot exceed 16 digits';
+      }
+      
+      // Luhn algorithm validation - REMOVED (too strict for test/demo cards)
+      // Users can create demo/test cards without real card numbers
+    } else {
+      // For pass/membership - just check it's not empty and has reasonable length
+      if (number.length < 3) {
+        return 'Pass number must be at least 3 characters';
+      }
+    }
+    
+    return null; // Valid
+  };
+
+  // Luhn algorithm for card number validation
+  const isValidLuhn = (cardNumber: string): boolean => {
+    let sum = 0;
+    let isEven = false;
+    
+    // Loop through values starting from the rightmost digit
+    for (let i = cardNumber.length - 1; i >= 0; i--) {
+      let digit = parseInt(cardNumber.charAt(i), 10);
+      
+      if (isEven) {
+        digit *= 2;
+        if (digit > 9) {
+          digit -= 9;
+        }
+      }
+      
+      sum += digit;
+      isEven = !isEven;
+    }
+    
+    return sum % 10 === 0;
+  };
+
+  // Validate expiry date format (MM/YY)
+  const validateExpiryDate = (expiry: string): string | null => {
+    if (!expiry) return null; // Optional field
+    
+    // Check format MM/YY
+    const expiryPattern = /^(0[1-9]|1[0-2])\/([0-9]{2})$/;
+    if (!expiryPattern.test(expiry)) {
+      return 'Expiry date must be in MM/YY format';
+    }
+    
+    // Check if date is in the future
+    const [month, year] = expiry.split('/');
+    const expiryDate = new Date(2000 + parseInt(year), parseInt(month) - 1);
+    const today = new Date();
+    
+    if (expiryDate < today) {
+      return 'Card has expired';
+    }
+    
+    return null;
+  };
+
+  // Format expiry date as user types
+  const formatExpiryDate = (value: string): string => {
+    // Remove all non-numeric characters
+    const numbers = value.replace(/\D/g, '');
+    
+    // Limit to 4 digits (MMYY)
+    const limited = numbers.slice(0, 4);
+    
+    // Add slash after month
+    if (limited.length >= 3) {
+      return `${limited.slice(0, 2)}/${limited.slice(2)}`;
+    }
+    
+    return limited;
+  };
+
+  // Handle form changes with validation and formatting
+  const handleFormChange = (field: keyof NewCardForm, value: string) => {
+    let processedValue = value;
+    
+    // Special handling for card number
+    if (field === 'number') {
+      processedValue = formatCardNumber(value, formData.type);
+    }
+    
+    // Special handling for expiry date
+    if (field === 'expiryDate') {
+      processedValue = formatExpiryDate(value);
+    }
+    
+    // Special handling for holder name - only letters and spaces
+    if (field === 'holderName') {
+      processedValue = value.replace(/[^a-zA-Z\s]/g, '').slice(0, 50);
+    }
+    
+    setFormData(prev => ({ ...prev, [field]: processedValue }));
+    
+    // Clear validation errors when user starts typing
+    if (validationErrors.length > 0) {
+      setValidationErrors([]);
+    }
+  };
+
+  // Save new card/pass with comprehensive validation
   const saveNewCard = async () => {
     // Check authentication first
     if (!auth.isAuthenticated) {
@@ -741,8 +930,37 @@ const QrScan = () => {
       return;
     }
 
-    if (!formData.title || !formData.number || !formData.holderName) {
-      setValidationErrors(['Please fill in all required fields: Title, Number, and Holder Name']);
+    // Collect all validation errors
+    const errors: string[] = [];
+    
+    // Required fields validation
+    if (!formData.title || formData.title.trim() === '') {
+      errors.push('Title is required');
+    }
+    
+    if (!formData.holderName || formData.holderName.trim() === '') {
+      errors.push('Holder name is required');
+    }
+    
+    // Card number validation with type-specific rules
+    const numberError = validateCardNumber(formData.number, formData.type);
+    if (numberError) {
+      errors.push(numberError);
+    }
+    
+    // Expiry date validation (only for credit/debit cards)
+    if ((formData.type === 'credit' || formData.type === 'debit') && formData.expiryDate) {
+      const expiryError = validateExpiryDate(formData.expiryDate);
+      if (expiryError) {
+        errors.push(expiryError);
+      }
+    }
+    
+    // Show all validation errors at once
+    if (errors.length > 0) {
+      setValidationErrors(errors);
+      // Scroll to validation errors
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
@@ -820,13 +1038,13 @@ const QrScan = () => {
 
       setCards(prev => [newCard, ...prev]);
       
-      // Reset form
+      // Reset form but keep holder name pre-filled with logged-in user
       setFormData({
         type: 'credit',
         title: '',
         number: '',
         expiryDate: '',
-        holderName: '',
+        holderName: auth.user?.name || '', // Keep user's name
         issuer: '',
         backgroundColor: cardTemplates[0].gradient,
         textColor: '#ffffff',
@@ -839,7 +1057,7 @@ const QrScan = () => {
       
       // Show success message with notification info
       const cardTypeName = formData.type === 'credit' || formData.type === 'debit' ? 'Card' : 'Pass';
-      alert(` ${cardTypeName} created successfully!\n\n A notification has been added to your dashboard.`);
+      alert(`✅ ${cardTypeName} created successfully!\n\n📬 A notification has been added to your dashboard.`);
     } catch (err: any) {
       console.error('Error creating card:', err);
       console.error('Error response:', err.response);

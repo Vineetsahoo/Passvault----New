@@ -188,6 +188,111 @@ export const passwordAPI = {
   markCompromised: (id: string) => api.post(`/passwords/${id}/compromised`),
 };
 
+// Sharing API
+export const sharingAPI = {
+  // Share passes
+  sharePass: (data: {
+    passId: string;
+    recipientEmail: string;
+    recipientName?: string;
+    accessLevel: 'read' | 'edit';
+    expiryDays?: number;
+    restrictions?: string[];
+    templateId?: string;
+    message?: string;
+  }) => api.post('/sharing/share', data),
+
+  batchShare: (data: {
+    passId: string;
+    recipients: Array<{ email: string; name?: string }>;
+    accessLevel: 'read' | 'edit';
+    expiryDays?: number;
+    templateId?: string;
+  }) => api.post('/sharing/batch-share', data),
+
+  generateLink: (data: {
+    passId: string;
+    accessLevel: 'read' | 'edit';
+    expiryHours?: number;
+    maxUses?: number;
+  }) => api.post('/sharing/generate-link', data),
+
+  // Get shares
+  getMyShares: (params?: {
+    page?: number;
+    limit?: number;
+    status?: 'pending' | 'active' | 'revoked' | 'expired';
+    search?: string;
+  }) => api.get('/sharing/my-shares', { params }),
+
+  getSharedWithMe: () => api.get('/sharing/shared-with-me'),
+
+  // Manage shares
+  updateShare: (id: string, data: {
+    accessLevel?: 'read' | 'edit';
+    restrictions?: string[];
+    expiryDays?: number;
+  }) => api.put(`/sharing/${id}`, data),
+
+  revokeAccess: (id: string, reason?: string) =>
+    api.delete(`/sharing/${id}/revoke`, { data: { reason } }),
+
+  // Templates
+  getTemplates: () => api.get('/sharing/templates'),
+
+  createTemplate: (data: {
+    name: string;
+    description?: string;
+    accessLevel: 'read' | 'edit';
+    expiryDays: number;
+    restrictions?: string[];
+  }) => api.post('/sharing/templates', data),
+
+  updateTemplate: (id: string, data: any) =>
+    api.put(`/sharing/templates/${id}`, data),
+
+  deleteTemplate: (id: string) => api.delete(`/sharing/templates/${id}`),
+
+  // Logs and stats
+  getLogs: (params?: {
+    page?: number;
+    limit?: number;
+    action?: string;
+  }) => api.get('/sharing/logs', { params }),
+
+  getStats: () => api.get('/sharing/stats'),
+};
+
+// QR Codes / Passes API
+export const qrCodesAPI = {
+  getCodes: (params?: {
+    page?: number;
+    limit?: number;
+    type?: string;
+    search?: string;
+  }) => api.get('/qrcodes', { params }),
+
+  getCode: (id: string) => api.get(`/qrcodes/${id}`),
+
+  createCode: (data: {
+    type: string;
+    title: string;
+    cardNumber?: string;
+    holderName?: string;
+    expiryDate?: string;
+    cvv?: string;
+    passId?: string;
+    category?: string;
+    notes?: string;
+  }) => api.post('/qrcodes', data),
+
+  updateCode: (id: string, data: any) => api.put(`/qrcodes/${id}`, data),
+
+  deleteCode: (id: string) => api.delete(`/qrcodes/${id}`),
+
+  generateQR: (id: string) => api.get(`/qrcodes/${id}/generate`),
+};
+
 // Utility functions
 export const isLoggedIn = (): boolean => {
   const token = localStorage.getItem('accessToken');
