@@ -111,18 +111,35 @@ router.post('/', authenticateToken, async (req, res) => {
         qrDataString = `tel:${data.phone}`;
         break;
       case 'text':
-        qrDataString = data.text;
+        // For text type, the data.text contains stringified card/pass data
+        // We need to parse it back to get the actual card data for QR generation
+        let textData = data.text;
+        if (typeof textData === 'string') {
+          try {
+            // Try to parse if it's a JSON string
+            textData = JSON.parse(textData);
+          } catch (e) {
+            // If parsing fails, use as is
+          }
+        }
+        // Use the parsed/original text data for QR code
+        qrDataString = typeof textData === 'object' ? JSON.stringify(textData) : textData;
+        console.log('📝 [QR Create - Text Type] QR data:', qrDataString.substring(0, 100));
         break;
       case 'contact':
         qrDataString = `BEGIN:VCARD\nVERSION:3.0\nFN:${data.name}\nTEL:${data.phone}\nEMAIL:${data.email}\nEND:VCARD`;
         break;
       case 'password':
         qrDataString = isEncrypted ? encryptedData : JSON.stringify(data);
+        console.log('💳 [QR Create - Password Type] QR data:', qrDataString.substring(0, 100));
         break;
       default:
         qrDataString = JSON.stringify(data);
     }
 
+    console.log(`🎨 [QR Create] Generating QR code image for type: ${qrType}`);
+    console.log(`🎨 [QR Create] QR data length: ${qrDataString.length} characters`);
+    
     // Generate QR code image
     const qrCodeImage = await qrcode.toDataURL(qrDataString, {
       color: {
@@ -132,6 +149,10 @@ router.post('/', authenticateToken, async (req, res) => {
       width: size || 256,
       errorCorrectionLevel: 'H'
     });
+
+    console.log(`✅ [QR Create] QR code image generated successfully`);
+    console.log(`✅ [QR Create] Image format: ${qrCodeImage.substring(0, 30)}...`);
+    console.log(`✅ [QR Create] Image size: ${qrCodeImage.length} characters`);
 
     // Create QR code record
     const qrCode = new QRCode({
@@ -208,15 +229,28 @@ router.post('/', authenticateToken, async (req, res) => {
 
     logger.info(`QR code created: ${qrCode._id} by user ${req.user.userId}`);
 
+    console.log(`📤 [QR Create] Sending response with QR code data`);
+    console.log(`📤 [QR Create] QR code ID: ${qrCode._id}`);
+    console.log(`📤 [QR Create] Title: ${qrCode.title}`);
+    console.log(`📤 [QR Create] Type: ${qrCode.qrType}`);
+    console.log(`📤 [QR Create] Has QR Image: ${!!qrCode.qrCodeImage}`);
+    console.log(`📤 [QR Create] QR Image length: ${qrCode.qrCodeImage?.length || 0}`);
+
     res.status(201).json({
       success: true,
       message: 'QR code created successfully',
       qrCode: {
+        _id: qrCode._id,
         id: qrCode._id,
         title: qrCode.title,
         qrType: qrCode.qrType,
+        data: qrCode.data,
         qrCodeImage: qrCode.qrCodeImage,
         isEncrypted: qrCode.isEncrypted,
+        category: qrCode.category,
+        color: qrCode.color,
+        backgroundColor: qrCode.backgroundColor,
+        expiresAt: qrCode.expiresAt,
         createdAt: qrCode.createdAt
       }
     });

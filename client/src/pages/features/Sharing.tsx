@@ -180,6 +180,9 @@ const Sharing: React.FC = () => {
   const [stats, setStats] = useState<any>(null);
   const [showTemplateForm, setShowTemplateForm] = useState(false);
 
+  // Validation errors state
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+
   // Form state
   const [shareForm, setShareForm] = useState({
     passId: '',
@@ -284,9 +287,31 @@ const Sharing: React.FC = () => {
 
   const handleSharePass = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
+    
+    // Clear previous errors
+    setValidationErrors({});
     setError(null);
     setSuccess(null);
+
+    // Validate form
+    const validation = validationUtils.shareForm(
+      {
+        passId: shareForm.passId,
+        recipientEmail: shareForm.recipientEmail,
+        recipientName: shareForm.recipientName,
+        expiryDays: shareForm.expiryDays,
+        message: shareForm.message
+      },
+      userPasses
+    );
+
+    if (!validation.valid) {
+      setValidationErrors(validation.errors);
+      setError('Please fix the validation errors before submitting');
+      return;
+    }
+
+    setIsLoading(true);
 
     try {
       const response = await sharingAPI.sharePass({
@@ -302,6 +327,7 @@ const Sharing: React.FC = () => {
       if (response.data.success) {
         setSuccess('Pass shared successfully!');
         setShowAddForm(false);
+        setValidationErrors({});
         setShareForm({
           passId: '',
           recipientEmail: '',
@@ -341,8 +367,10 @@ const Sharing: React.FC = () => {
   };
 
   const generateShareLink = async () => {
-    if (!shareForm.passId) {
-      setError('Please select a pass first');
+    // Validate pass selection
+    const passValidation = validationUtils.passSelection(shareForm.passId, userPasses);
+    if (!passValidation.valid) {
+      setError(passValidation.error!);
       return;
     }
 
@@ -368,17 +396,21 @@ const Sharing: React.FC = () => {
   };
 
   const handleBatchShare = async () => {
-    const emails = batchEmails.split('\n').filter(email => email.trim());
-    
-    if (emails.length === 0) {
-      setError('Please enter at least one email address');
+    // Validate batch emails
+    const emailValidation = validationUtils.batchEmails(batchEmails);
+    if (!emailValidation.valid) {
+      setError(emailValidation.error!);
       return;
     }
 
-    if (!shareForm.passId) {
-      setError('Please select a pass first');
+    // Validate pass selection
+    const passValidation = validationUtils.passSelection(shareForm.passId, userPasses);
+    if (!passValidation.valid) {
+      setError(passValidation.error!);
       return;
     }
+
+    const emails = emailValidation.validEmails!;
 
     setIsLoading(true);
     setError(null);
@@ -415,18 +447,30 @@ const Sharing: React.FC = () => {
   const handleCreateTemplate = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!templateForm.name.trim()) {
-      setError('Template name is required');
+    // Clear previous errors
+    setValidationErrors({});
+    setError(null);
+
+    // Validate template form
+    const validation = validationUtils.templateForm({
+      name: templateForm.name,
+      expiryDays: templateForm.expiryDays,
+      restrictions: templateForm.restrictions
+    });
+
+    if (!validation.valid) {
+      setValidationErrors(validation.errors);
+      setError('Please fix the validation errors before submitting');
       return;
     }
 
     setIsLoading(true);
-    setError(null);
     try {
       const response = await sharingAPI.createTemplate(templateForm);
 
       if (response.data.success) {
         setSuccess('Template created successfully!');
+        setValidationErrors({});
         setTemplateForm({
           name: '',
           accessLevel: 'read',
@@ -584,11 +628,38 @@ const Sharing: React.FC = () => {
                       <input
                         type="email"
                         value={shareForm.recipientEmail}
-                        onChange={(e) => setShareForm(prev => ({ ...prev, recipientEmail: e.target.value }))}
+                        onChange={(e) => {
+                          setShareForm(prev => ({ ...prev, recipientEmail: e.target.value }));
+                          // Real-time validation
+                          const validation = validationUtils.email(e.target.value);
+                          setValidationErrors(prev => ({
+                            ...prev,
+                            recipientEmail: validation.valid ? '' : validation.error!
+                          }));
+                        }}
+                        onBlur={(e) => {
+                          // Validate on blur
+                          const validation = validationUtils.email(e.target.value);
+                          if (!validation.valid) {
+                            setValidationErrors(prev => ({
+                              ...prev,
+                              recipientEmail: validation.error!
+                            }));
+                          }
+                        }}
                         required
                         placeholder="Enter email address"
-                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all shadow-sm"
+                        className={getValidationClassName(
+                          !!validationErrors.recipientEmail,
+                          'w-full p-2.5 border rounded-lg focus:ring-2 transition-all shadow-sm'
+                        )}
                       />
+                      {validationErrors.recipientEmail && (
+                        <p className="text-xs text-rose-600 flex items-center gap-1 mt-1">
+                          <AlertCircle className="h-3 w-3" />
+                          {validationErrors.recipientEmail}
+                        </p>
+                      )}
                     </div>
                     
                     <div className="space-y-2">
@@ -596,10 +667,27 @@ const Sharing: React.FC = () => {
                       <input
                         type="text"
                         value={shareForm.recipientName}
-                        onChange={(e) => setShareForm(prev => ({ ...prev, recipientName: e.target.value }))}
+                        onChange={(e) => {
+                          setShareForm(prev => ({ ...prev, recipientName: e.target.value }));
+                          // Real-time validation
+                          const validation = validationUtils.recipientName(e.target.value);
+                          setValidationErrors(prev => ({
+                            ...prev,
+                            recipientName: validation.valid ? '' : validation.error!
+                          }));
+                        }}
                         placeholder="Optional"
-                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all shadow-sm"
+                        className={getValidationClassName(
+                          !!validationErrors.recipientName,
+                          'w-full p-2.5 border rounded-lg focus:ring-2 transition-all shadow-sm'
+                        )}
                       />
+                      {validationErrors.recipientName && (
+                        <p className="text-xs text-rose-600 flex items-center gap-1 mt-1">
+                          <AlertCircle className="h-3 w-3" />
+                          {validationErrors.recipientName}
+                        </p>
+                      )}
                     </div>
                   </div>
                   
@@ -623,9 +711,27 @@ const Sharing: React.FC = () => {
                         min="1"
                         max="365"
                         value={shareForm.expiryDays}
-                        onChange={(e) => setShareForm(prev => ({ ...prev, expiryDays: parseInt(e.target.value) || 30 }))}
-                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 shadow-sm"
+                        onChange={(e) => {
+                          const value = parseInt(e.target.value) || 30;
+                          setShareForm(prev => ({ ...prev, expiryDays: value }));
+                          // Real-time validation
+                          const validation = validationUtils.expiryDays(value);
+                          setValidationErrors(prev => ({
+                            ...prev,
+                            expiryDays: validation.valid ? '' : validation.error!
+                          }));
+                        }}
+                        className={getValidationClassName(
+                          !!validationErrors.expiryDays,
+                          'w-full p-2.5 border rounded-lg focus:ring-2 shadow-sm'
+                        )}
                       />
+                      {validationErrors.expiryDays && (
+                        <p className="text-xs text-rose-600 flex items-center gap-1 mt-1">
+                          <AlertCircle className="h-3 w-3" />
+                          {validationErrors.expiryDays}
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -633,11 +739,36 @@ const Sharing: React.FC = () => {
                     <label className="text-sm font-medium text-slate-700 block">Message (Optional)</label>
                     <textarea
                       value={shareForm.message}
-                      onChange={(e) => setShareForm(prev => ({ ...prev, message: e.target.value }))}
+                      onChange={(e) => {
+                        if (e.target.value.length <= 500) {
+                          setShareForm(prev => ({ ...prev, message: e.target.value }));
+                          // Real-time validation
+                          const validation = validationUtils.message(e.target.value);
+                          setValidationErrors(prev => ({
+                            ...prev,
+                            message: validation.valid ? '' : validation.error!
+                          }));
+                        }
+                      }}
                       placeholder="Add a message for the recipient..."
                       rows={3}
-                      className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 shadow-sm resize-none"
+                      maxLength={500}
+                      className={getValidationClassName(
+                        !!validationErrors.message,
+                        'w-full p-2.5 border rounded-lg focus:ring-2 shadow-sm resize-none'
+                      )}
                     />
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-slate-500">
+                        {shareForm.message.length}/500 characters
+                      </span>
+                      {validationErrors.message && (
+                        <p className="text-xs text-rose-600 flex items-center gap-1">
+                          <AlertCircle className="h-3 w-3" />
+                          {validationErrors.message}
+                        </p>
+                      )}
+                    </div>
                   </div>
                   
                   <div className="pt-4 flex gap-3">
@@ -711,11 +842,28 @@ const Sharing: React.FC = () => {
                       <input
                         type="text"
                         value={templateForm.name}
-                        onChange={(e) => setTemplateForm({...templateForm, name: e.target.value})}
+                        onChange={(e) => {
+                          setTemplateForm({...templateForm, name: e.target.value});
+                          // Real-time validation
+                          const validation = validationUtils.templateName(e.target.value);
+                          setValidationErrors(prev => ({
+                            ...prev,
+                            templateName: validation.valid ? '' : validation.error!
+                          }));
+                        }}
                         placeholder="e.g., Family Members, Trusted Friends, Work Colleagues"
-                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 shadow-sm"
+                        className={getValidationClassName(
+                          !!validationErrors.templateName,
+                          'w-full p-2.5 border rounded-lg focus:ring-2 shadow-sm'
+                        )}
                         required
                       />
+                      {validationErrors.templateName && (
+                        <p className="text-xs text-rose-600 flex items-center gap-1 mt-1">
+                          <AlertCircle className="h-3 w-3" />
+                          {validationErrors.templateName}
+                        </p>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -740,11 +888,29 @@ const Sharing: React.FC = () => {
                         <input
                           type="number"
                           value={templateForm.expiryDays}
-                          onChange={(e) => setTemplateForm({...templateForm, expiryDays: parseInt(e.target.value)})}
+                          onChange={(e) => {
+                            const value = parseInt(e.target.value);
+                            setTemplateForm({...templateForm, expiryDays: value});
+                            // Real-time validation
+                            const validation = validationUtils.expiryDays(value);
+                            setValidationErrors(prev => ({
+                              ...prev,
+                              templateExpiryDays: validation.valid ? '' : validation.error!
+                            }));
+                          }}
                           min="1"
                           max="365"
-                          className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 shadow-sm"
+                          className={getValidationClassName(
+                            !!validationErrors.templateExpiryDays,
+                            'w-full p-2.5 border rounded-lg focus:ring-2 shadow-sm'
+                          )}
                         />
+                        {validationErrors.templateExpiryDays && (
+                          <p className="text-xs text-rose-600 flex items-center gap-1 mt-1">
+                            <AlertCircle className="h-3 w-3" />
+                            {validationErrors.templateExpiryDays}
+                          </p>
+                        )}
                       </div>
                     </div>
 
@@ -1104,10 +1270,40 @@ const Sharing: React.FC = () => {
                   </div>
                   <textarea
                     value={batchEmails}
-                    onChange={(e) => setBatchEmails(e.target.value)}
+                    onChange={(e) => {
+                      setBatchEmails(e.target.value);
+                      // Real-time validation
+                      if (e.target.value.trim()) {
+                        const validation = validationUtils.batchEmails(e.target.value);
+                        setValidationErrors(prev => ({
+                          ...prev,
+                          batchEmails: validation.valid ? '' : validation.error!
+                        }));
+                      } else {
+                        setValidationErrors(prev => ({
+                          ...prev,
+                          batchEmails: ''
+                        }));
+                      }
+                    }}
                     placeholder="john@example.com&#10;jane@example.com&#10;alex@example.com"
-                    className="w-full h-28 p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 shadow-sm font-mono text-sm"
+                    className={getValidationClassName(
+                      !!validationErrors.batchEmails,
+                      'w-full h-28 p-3 border rounded-lg focus:ring-2 shadow-sm font-mono text-sm'
+                    )}
                   />
+                  {validationErrors.batchEmails && (
+                    <p className="text-xs text-rose-600 flex items-center gap-1 mt-2">
+                      <AlertCircle className="h-3 w-3" />
+                      {validationErrors.batchEmails}
+                    </p>
+                  )}
+                  {batchEmails.trim() && !validationErrors.batchEmails && (
+                    <p className="text-xs text-emerald-600 flex items-center gap-1 mt-2">
+                      <CheckCircle className="h-3 w-3" />
+                      {batchEmails.split('\n').filter(e => e.trim()).length} valid email(s) ready to share
+                    </p>
+                  )}
                 </div>
                 
                 <div className="flex flex-col sm:flex-row gap-3">

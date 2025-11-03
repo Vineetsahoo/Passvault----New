@@ -19,16 +19,151 @@ const router = express.Router();
 // Apply authentication middleware to all user routes
 router.use(authenticateToken);
 
-// Validation middleware
+// Comprehensive validation middleware
 const validateProfileUpdate = [
+  // Basic Info
   body('name')
     .optional()
     .trim()
+    .notEmpty()
+    .withMessage('Name cannot be empty')
     .isLength({ min: 2, max: 50 })
-    .withMessage('Name must be between 2 and 50 characters'),
+    .withMessage('Name must be between 2 and 50 characters')
+    .matches(/^[a-zA-Z\s'-]+$/)
+    .withMessage('Name can only contain letters, spaces, hyphens, and apostrophes'),
+  
+  // Personal Info - Only validate if not empty
+  body('profile.personalInfo.phoneNumber')
+    .optional({ checkFalsy: true })
+    .matches(/^\+?[\d\s-()]+$/)
+    .withMessage('Phone number format is invalid')
+    .isLength({ min: 10, max: 20 })
+    .withMessage('Phone number must be between 10 and 20 characters'),
+  
+  body('profile.personalInfo.dateOfBirth')
+    .optional({ checkFalsy: true })
+    .custom((value) => {
+      if (!value) return true;
+      const date = new Date(value);
+      const now = new Date();
+      const age = now.getFullYear() - date.getFullYear();
+      if (age < 13 || age > 120) {
+        throw new Error('Age must be between 13 and 120 years');
+      }
+      return true;
+    }),
+  
+  body('profile.personalInfo.nationality')
+    .optional({ checkFalsy: true })
+    .trim()
+    .isLength({ min: 2, max: 50 })
+    .withMessage('Nationality must be between 2 and 50 characters'),
+  
+  body('profile.personalInfo.maritalStatus')
+    .optional({ checkFalsy: true })
+    .isIn(['Single', 'Married', 'Divorced', 'Widowed', 'Other'])
+    .withMessage('Invalid marital status'),
+  
+  body('profile.personalInfo.gender')
+    .optional({ checkFalsy: true })
+    .isIn(['Male', 'Female', 'Other', 'Prefer not to say'])
+    .withMessage('Invalid gender selection'),
+  
+  // Professional Info - Only validate if not empty
+  body('profile.professionalInfo.occupation')
+    .optional({ checkFalsy: true })
+    .trim()
+    .isLength({ min: 2, max: 100 })
+    .withMessage('Occupation must be between 2 and 100 characters'),
+  
+  body('profile.professionalInfo.company')
+    .optional({ checkFalsy: true })
+    .trim()
+    .isLength({ min: 2, max: 100 })
+    .withMessage('Company name must be between 2 and 100 characters'),
+  
+  body('profile.professionalInfo.department')
+    .optional({ checkFalsy: true })
+    .trim()
+    .isLength({ max: 50 })
+    .withMessage('Department name cannot exceed 50 characters'),
+  
+  body('profile.professionalInfo.employeeId')
+    .optional({ checkFalsy: true })
+    .trim()
+    .matches(/^[A-Za-z0-9-_]+$/)
+    .withMessage('Employee ID can only contain letters, numbers, hyphens, and underscores')
+    .isLength({ max: 20 })
+    .withMessage('Employee ID cannot exceed 20 characters'),
+  
+  body('profile.professionalInfo.experience')
+    .optional({ checkFalsy: true })
+    .trim()
+    .isLength({ max: 50 })
+    .withMessage('Experience cannot exceed 50 characters'),
+  
+  // Address - Only validate if not empty
+  body('profile.address.street')
+    .optional({ checkFalsy: true })
+    .trim()
+    .isLength({ min: 5, max: 200 })
+    .withMessage('Street address must be between 5 and 200 characters'),
+  
+  body('profile.address.city')
+    .optional({ checkFalsy: true })
+    .trim()
+    .isLength({ min: 2, max: 50 })
+    .withMessage('City name must be between 2 and 50 characters')
+    .matches(/^[a-zA-Z\s-]+$/)
+    .withMessage('City name can only contain letters, spaces, and hyphens'),
+  
+  body('profile.address.state')
+    .optional({ checkFalsy: true })
+    .trim()
+    .isLength({ min: 2, max: 50 })
+    .withMessage('State name must be between 2 and 50 characters'),
+  
+  body('profile.address.country')
+    .optional({ checkFalsy: true })
+    .trim()
+    .isLength({ min: 2, max: 50 })
+    .withMessage('Country name must be between 2 and 50 characters'),
+  
+  body('profile.address.postalCode')
+    .optional({ checkFalsy: true })
+    .trim()
+    .matches(/^[A-Z0-9\s-]+$/i)
+    .withMessage('Postal code format is invalid')
+    .isLength({ min: 3, max: 10 })
+    .withMessage('Postal code must be between 3 and 10 characters'),
+  
+  // Social Profiles - Only validate if not empty
+  body('profile.socialProfiles.linkedin')
+    .optional({ checkFalsy: true })
+    .trim()
+    .isURL()
+    .withMessage('LinkedIn URL is invalid'),
+  
+  body('profile.socialProfiles.github')
+    .optional({ checkFalsy: true })
+    .trim()
+    .isURL()
+    .withMessage('GitHub URL is invalid'),
+  
+  body('profile.socialProfiles.twitter')
+    .optional({ checkFalsy: true })
+    .trim()
+    .isURL()
+    .withMessage('Twitter URL is invalid'),
+  
+  body('profile.socialProfiles.website')
+    .optional({ checkFalsy: true })
+    .trim()
+    .isURL()
+    .withMessage('Website URL is invalid'),
   
   body('profile.bio')
-    .optional()
+    .optional({ checkFalsy: true })
     .isLength({ max: 500 })
     .withMessage('Bio cannot exceed 500 characters'),
   
@@ -96,10 +231,15 @@ router.put('/profile', validateProfileUpdate, async (req, res) => {
     
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      console.log('❌ Validation errors:', errors.array());
       return res.status(400).json({
         success: false,
         message: 'Validation failed',
-        errors: errors.array()
+        errors: errors.array().map(err => ({
+          field: err.path || err.param,
+          message: err.msg,
+          value: err.value
+        }))
       });
     }
 
@@ -111,7 +251,7 @@ router.put('/profile', validateProfileUpdate, async (req, res) => {
       }
     });
 
-    console.log('Update fields:', updateFields);
+    console.log('✅ Validation passed. Update fields:', updateFields);
 
     // Use MongoDB $set operator for safe nested updates
     const updatedUser = await User.findByIdAndUpdate(
@@ -157,9 +297,9 @@ router.put('/profile', validateProfileUpdate, async (req, res) => {
         }
       });
 
-      console.log('About to save notification...');
+      console.log('📬 Notification created for profile update');
       await updatedUser.save();
-      console.log('Notification saved successfully!');
+      console.log('✅ Profile update saved successfully!');
     }
 
     logger.info(`Profile updated for user: ${updatedUser.email}`);
@@ -180,6 +320,7 @@ router.put('/profile', validateProfileUpdate, async (req, res) => {
     });
 
   } catch (error) {
+    console.error('❌ Update profile error:', error);
     logger.error('Update profile error:', error);
     res.status(500).json({
       success: false,

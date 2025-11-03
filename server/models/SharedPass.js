@@ -77,9 +77,8 @@ const sharedPassSchema = new mongoose.Schema({
   },
   shareLink: {
     token: {
-      type: String,
-      unique: true,
-      sparse: true
+      type: String
+      // Index with unique and sparse is defined at schema level below
     },
     expiresAt: {
       type: Date
@@ -100,8 +99,8 @@ const sharedPassSchema = new mongoose.Schema({
   },
   expiresAt: {
     type: Date,
-    default: null,
-    index: true
+    default: null
+    // Removed 'index: true' - index is defined at schema level below
   },
   lastAccessed: {
     type: Date,
@@ -136,7 +135,7 @@ const sharedPassSchema = new mongoose.Schema({
 // Indexes for performance
 sharedPassSchema.index({ owner: 1, status: 1 });
 sharedPassSchema.index({ 'recipient.email': 1, status: 1 });
-sharedPassSchema.index({ 'shareLink.token': 1 });
+sharedPassSchema.index({ 'shareLink.token': 1 }, { unique: true, sparse: true });
 sharedPassSchema.index({ expiresAt: 1 });
 
 // Virtual for checking if expired

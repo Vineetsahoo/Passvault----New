@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
+import TerminalQrScanner from '../../components/TerminalQrScanner';
 import qrcodeService, { QRCode as QRCodeType, QRCodeType as QRType, CreateQRCodeData } from '../../services/qrcodeService';
 
 // Feature Template component for page layout
@@ -623,6 +624,7 @@ const QrScan = () => {
       }
       
       console.log(`✅ Fetched ${response.qrcodes.length} QR codes`);
+      console.log('📦 Raw QR codes from backend:', response.qrcodes);
       
       // Convert backend QR codes to CardData format
       const convertedCards = response.qrcodes.map((qr: QRCodeType) => {
@@ -630,37 +632,123 @@ const QrScan = () => {
           ? `linear-gradient(135deg, ${qr.backgroundColor} 0%, ${qr.color} 100%)`
           : cardTemplates[0].gradient;
 
-        // Extract data from QR data object
-        const qrData = typeof qr.data === 'object' ? qr.data : {};
+        // Extract data from QR data object - handle both direct objects and nested text field
+        let qrData = typeof qr.data === 'object' ? qr.data : {};
+        let parsedData = qrData;
         
         // Try to parse the text field if it exists (for text type QR codes)
-        let parsedData = qrData;
         if (qrData.text && typeof qrData.text === 'string') {
           try {
             parsedData = JSON.parse(qrData.text);
+            console.log(`📝 Parsed text field for "${qr.title}":`, parsedData);
           } catch (e) {
+            console.log(`⚠️ Could not parse text field for "${qr.title}"`);
             parsedData = qrData;
           }
         }
-
-        // Determine card type - first check the parsed data, then qrType, then category
-        let cardType: 'credit' | 'debit' | 'pass' | 'membership' = 'pass';
-        if (parsedData.type) {
-          // Use the type from the saved data
-          cardType = parsedData.type;
-          console.log(`Card "${qr.title}" type from data:`, cardType);
-        } else if (qr.qrType === 'password') {
-          // Password type QR codes are typically credit/debit cards
-          cardType = qrData.type || 'credit';
-          console.log(`Card "${qr.title}" type from qrType (password):`, cardType);
-        } else if (qr.category) {
-          // Fallback to category-based detection
-          if (qr.category.toLowerCase().includes('credit')) cardType = 'credit';
-          else if (qr.category.toLowerCase().includes('debit')) cardType = 'debit';
-          else if (qr.category.toLowerCase().includes('membership')) cardType = 'membership';
-          else cardType = 'pass';
-          console.log(`Card "${qr.title}" type from category "${qr.category}":`, cardType);
+        
+        // For password type, check if data is directly available
+        if (qr.qrType === 'password' && qrData && !qrData.text) {
+          parsedData = qrData;
+          console.log(`🔐 Using direct password data for "${qr.title}":`, parsedData);
         }
+
+        // Determine card type with improved logic
+        let cardType: 'credit' | 'debit' | 'pass' | 'membership' = 'pass';
+        
+        console.log(`🔍 Processing card "${qr.title}":`, {
+          qrType: qr.qrType,
+          category: qr.category,
+          hasQrCodeImage: !!qr.qrCodeImage,
+          qrCodeImageLength: qr.qrCodeImage?.length || 0,
+          qrCodeImagePreview: qr.qrCodeImage?.substring(0, 50),
+          rawQrData: qrData,
+          parsedData
+        });
+        
+        // Priority 1: Check parsedData.type (from saved card data)
+        if (parsedData.type) {
+          const rawType = parsedData.type.toLowerCase();
+          
+          // Map the raw type to our standardized types
+          if (rawType === 'credit') {
+            cardType = 'credit';
+          } else if (rawType === 'debit') {
+            cardType = 'debit';
+          } else if (
+            rawType.includes('membership') || 
+            rawType === 'loyalty-card' ||
+            rawType.includes('loyalty') ||
+            rawType.includes('vip') ||
+            rawType.includes('premium')
+          ) {
+            cardType = 'membership';
+          } else {
+            // Everything else (boarding-pass, parking-pass, event-ticket, etc.) is a pass
+            cardType = 'pass';
+          }
+          
+          console.log(`✅ Card "${qr.title}" type from parsedData.type "${parsedData.type}" → mapped to:`, cardType);
+        } 
+        // Priority 2: Check qrType - password types are credit/debit cards
+        else if (qr.qrType === 'password') {
+          // If it's password type, check category or default to credit
+          const catLower = (qr.category || '').toLowerCase();
+          if (catLower.includes('debit')) {
+            cardType = 'debit';
+          } else if (catLower.includes('credit')) {
+            cardType = 'credit';
+          } else if (catLower.includes('card')) {
+            // Default to credit if it mentions "card" but not specific
+            cardType = 'credit';
+          } else {
+            // Default password types to credit card
+            cardType = 'credit';
+          }
+          console.log(`💳 Card "${qr.title}" type from qrType=password + category:`, cardType);
+        } 
+        // Priority 3: Check category for text types (including terminal QR passes)
+        else if (qr.category) {
+          const catLower = qr.category.toLowerCase();
+          
+          // Check for credit/debit cards
+          if (catLower.includes('credit')) {
+            cardType = 'credit';
+          } else if (catLower.includes('debit')) {
+            cardType = 'debit';
+          } 
+          // Check for memberships (gym-membership, loyalty-card, VIP, premium, etc.)
+          else if (
+            catLower.includes('membership') || 
+            catLower.includes('premium') || 
+            catLower.includes('vip') || 
+            catLower.includes('gold') || 
+            catLower.includes('silver') ||
+            catLower.includes('platinum') ||
+            catLower.includes('diamond') ||
+            catLower.includes('elite') ||
+            catLower.includes('loyalty')
+          ) {
+            cardType = 'membership';
+          } 
+          // Everything else is a pass (boarding-pass, parking-pass, event-ticket, etc.)
+          else {
+            cardType = 'pass';
+          }
+          
+          console.log(`🏷️ Card "${qr.title}" type from category "${qr.category}":`, cardType);
+        }
+        
+        console.log(`📌 Final card type for "${qr.title}":`, cardType);
+        
+        // Determine QR data to display
+        const finalQrData = qr.qrCodeImage || qr._id;
+        console.log(`🖼️ Card "${qr.title}" QR data:`, {
+          hasImage: !!qr.qrCodeImage,
+          imageStartsWith: qr.qrCodeImage?.substring(0, 20),
+          usingImage: !!qr.qrCodeImage,
+          fallbackToId: !qr.qrCodeImage
+        });
         
         return {
           id: qr._id,
@@ -672,9 +760,26 @@ const QrScan = () => {
           issuer: parsedData.issuer || qrData.issuer || qr.category || 'Issuer',
           backgroundColor: { gradient },
           textColor: '#ffffff',
-          qrData: qr.qrCodeImage || qr._id,
+          qrData: finalQrData,
         };
       });
+
+      console.log('🎯 Converted cards:', convertedCards);
+      console.log('📊 Card types breakdown:', {
+        total: convertedCards.length,
+        credit: convertedCards.filter(c => c.type === 'credit').length,
+        debit: convertedCards.filter(c => c.type === 'debit').length,
+        pass: convertedCards.filter(c => c.type === 'pass').length,
+        membership: convertedCards.filter(c => c.type === 'membership').length
+      });
+      
+      // Debug: Log all pass types individually
+      const allPasses = convertedCards.filter(c => c.type === 'pass' || c.type === 'membership');
+      console.log('🎫 ALL PASSES & MEMBERSHIPS:', allPasses.map(p => ({
+        title: p.title,
+        type: p.type,
+        id: p.id
+      })));
 
       setCards(convertedCards);
     } catch (err: any) {
@@ -1018,10 +1123,22 @@ const QrScan = () => {
       console.log('Creating QR code with data:', qrCodeData);
       const newQRCode = await qrcodeService.createQRCode(qrCodeData);
       console.log('QR code created successfully:', newQRCode);
+      console.log('🖼️ QR code image received:', {
+        hasImage: !!newQRCode.qrCodeImage,
+        imageLength: newQRCode.qrCodeImage?.length || 0,
+        imagePreview: newQRCode.qrCodeImage?.substring(0, 50),
+        startsWithDataImage: newQRCode.qrCodeImage?.startsWith('data:image')
+      });
 
       const gradient = newQRCode.color && newQRCode.backgroundColor 
         ? `linear-gradient(135deg, ${newQRCode.backgroundColor} 0%, ${newQRCode.color} 100%)`
         : formData.backgroundColor;
+
+      const finalQrData = newQRCode.qrCodeImage || newQRCode._id;
+      console.log('📌 Using QR data:', {
+        source: newQRCode.qrCodeImage ? 'image' : 'id',
+        value: finalQrData.substring(0, 50)
+      });
 
       const newCard: CardData = {
         id: newQRCode._id,
@@ -1033,7 +1150,7 @@ const QrScan = () => {
         issuer: formData.issuer,
         backgroundColor: { gradient },
         textColor: formData.textColor,
-        qrData: newQRCode.qrCodeImage || newQRCode._id
+        qrData: finalQrData
       };
 
       setCards(prev => [newCard, ...prev]);
@@ -1184,6 +1301,17 @@ const QrScan = () => {
                     src={card.qrData} 
                     alt="QR Code" 
                     className="w-[84px] h-[84px]"
+                    onError={(e) => {
+                      console.error(`❌ Failed to load QR image for card: ${card.title}`);
+                      // Fallback to SVG QR code if image fails
+                      const target = e.target as HTMLImageElement;
+                      target.style.display = 'none';
+                      target.parentElement!.innerHTML = `
+                        <div class="w-[84px] h-[84px] flex items-center justify-center bg-slate-100 text-xs text-slate-600">
+                          QR Code
+                        </div>
+                      `;
+                    }}
                   />
                 ) : (
                   <QRCodeSVG 
@@ -1644,6 +1772,55 @@ const QrScan = () => {
                     }`}
                   >
                     Batch Mode
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Terminal QR Scanner Section - NEW! */}
+          <div className="bg-white border border-slate-200/60 rounded-xl shadow-lg overflow-hidden">
+            <div className="bg-gradient-to-r from-purple-50 to-pink-50/30 p-4 border-b border-purple-100">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-medium flex items-center gap-2 text-slate-800">
+                    <QrCode className="h-5 w-5 text-purple-600" />
+                    Terminal QR Scanner
+                  </h3>
+                  <p className="text-sm text-slate-600 mt-1">
+                    Generate QR code in terminal, scan with phone camera
+                  </p>
+                </div>
+                <div className="bg-purple-100 text-purple-700 px-3 py-1 rounded-full text-xs font-medium">
+                  Recommended
+                </div>
+              </div>
+            </div>
+            
+            <div className="p-6">
+              {auth.isAuthenticated ? (
+                <TerminalQrScanner 
+                  onScanSuccess={(passData) => {
+                    console.log('Terminal scan successful:', passData);
+                    // Refresh the cards list
+                    fetchQRCodes();
+                    // Show success notification
+                    alert(`✅ Pass created successfully!\n\n📬 ${passData.title} has been added to your collection.`);
+                  }}
+                />
+              ) : (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 text-center">
+                  <Lock className="h-12 w-12 mx-auto text-amber-600 mb-3" />
+                  <h4 className="font-semibold text-slate-800 mb-2">Sign in Required</h4>
+                  <p className="text-slate-600 mb-4">
+                    Please sign in to use the Terminal QR Scanner
+                  </p>
+                  <button 
+                    onClick={() => navigate('/signin')}
+                    className="inline-flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all shadow-md"
+                  >
+                    <LogIn className="h-5 w-5" />
+                    Sign In Now
                   </button>
                 </div>
               )}

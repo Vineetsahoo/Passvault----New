@@ -12,7 +12,9 @@
     "setup": "node scripts/setup.js",
     "test:db": "node scripts/testDb.js",
     "seed": "node scripts/seed.js",
-    "manage-shares": "node manageShares.js"
+    "manage-shares": "node manageShares.js",
+    "generate-qr": "node terminalQr.js",
+    "check-ip": "node check-ip.js"
   },
   "keywords": [
     "passvault",
@@ -24,7 +26,9 @@
   "license": "MIT",
   "dependencies": {
     "archiver": "^7.0.1",
+    "axios": "^1.13.1",
     "bcryptjs": "^2.4.3",
+    "chalk": "^5.6.2",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "crypto": "^1.0.1",
@@ -40,6 +44,7 @@
     "multer": "^2.0.2",
     "nodemailer": "^7.0.9",
     "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
     "unzipper": "^0.12.3",
     "winston": "^3.17.0"
   },

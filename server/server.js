@@ -23,6 +23,7 @@ import historyRoutes from './routes/history.js';
 import monitoringRoutes from './routes/monitoring.js';
 import transactionsRoutes from './routes/transactions.js';
 import sharingRoutes from './routes/sharing.js';
+import terminalQrRoutes from './routes/terminalQr.js';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler.js';
@@ -105,6 +106,7 @@ app.use('/api/history', historyRoutes);
 app.use('/api/monitoring', monitoringRoutes);
 app.use('/api/transactions', transactionsRoutes);
 app.use('/api/sharing', sharingRoutes);
+app.use('/api/terminal-qr', terminalQrRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {

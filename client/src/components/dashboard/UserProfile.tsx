@@ -20,6 +20,63 @@ import { HiOutlineUserCircle } from 'react-icons/hi';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
+// Country to phone code mapping
+const COUNTRY_PHONE_CODES: Record<string, string> = {
+  'india': '+91',
+  'united states': '+1',
+  'usa': '+1',
+  'united kingdom': '+44',
+  'uk': '+44',
+  'canada': '+1',
+  'australia': '+61',
+  'germany': '+49',
+  'france': '+33',
+  'japan': '+81',
+  'china': '+86',
+  'brazil': '+55',
+  'russia': '+7',
+  'south korea': '+82',
+  'spain': '+34',
+  'italy': '+39',
+  'mexico': '+52',
+  'indonesia': '+62',
+  'netherlands': '+31',
+  'saudi arabia': '+966',
+  'turkey': '+90',
+  'switzerland': '+41',
+  'poland': '+48',
+  'belgium': '+32',
+  'sweden': '+46',
+  'norway': '+47',
+  'austria': '+43',
+  'denmark': '+45',
+  'finland': '+358',
+  'singapore': '+65',
+  'malaysia': '+60',
+  'thailand': '+66',
+  'philippines': '+63',
+  'vietnam': '+84',
+  'pakistan': '+92',
+  'bangladesh': '+880',
+  'egypt': '+20',
+  'nigeria': '+234',
+  'south africa': '+27',
+  'argentina': '+54',
+  'colombia': '+57',
+  'chile': '+56',
+  'peru': '+51',
+  'uae': '+971',
+  'united arab emirates': '+971',
+  'israel': '+972',
+  'greece': '+30',
+  'portugal': '+351',
+  'new zealand': '+64',
+  'ireland': '+353',
+  'czech republic': '+420',
+  'romania': '+40',
+  'hungary': '+36',
+};
+
 interface IUserProfile {
   name: string;
   email: string;
@@ -260,6 +317,23 @@ const InfoCard: React.FC<{ label: string; value: string; icon?: React.ReactNode 
     </div>
   </motion.div>
 );
+
+// Validation Error Component
+const ValidationError: React.FC<{ message?: string }> = ({ message }) => {
+  if (!message) return null;
+  return (
+    <motion.p
+      initial={{ opacity: 0, y: -5 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="text-red-600 text-sm mt-1 flex items-center gap-1"
+    >
+      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+      </svg>
+      {message}
+    </motion.p>
+  );
+};
 
 const PersonalInfoCard: React.FC<{ info: IUserProfile['personalInfo'] }> = ({ info }) => (
   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1198,6 +1272,7 @@ const UserProfile: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [editFormData, setEditFormData] = useState<IUserProfile | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   
   const [userProfile, setUserProfile] = useState<IUserProfile>({
     name: '',
@@ -1304,6 +1379,299 @@ const UserProfile: React.FC = () => {
       ]
     }
   });
+
+  // ==================== PHONE FORMATTING FUNCTIONS ====================
+  
+  // Get country code from nationality
+  const getCountryCode = (nationality: string): string => {
+    if (!nationality) return '';
+    const normalizedNationality = nationality.toLowerCase().trim();
+    return COUNTRY_PHONE_CODES[normalizedNationality] || '';
+  };
+
+  // Format phone number with spacing after every 5 digits
+  const formatPhoneNumber = (phone: string, countryCode: string): string => {
+    // If input is empty or just spaces, return empty
+    if (!phone || phone.trim() === '') return '';
+    
+    // Remove all non-digit characters except +
+    let cleaned = phone.replace(/[^\d+]/g, '');
+    
+    // Extract or use country code
+    let code = '';
+    let phoneDigits = '';
+    
+    if (cleaned.startsWith('+')) {
+      // If starts with +, extract the country code we know
+      if (countryCode) {
+        // Use the known country code
+        code = countryCode;
+        // Remove the country code part and get remaining digits
+        phoneDigits = cleaned.substring(countryCode.length).replace(/\D/g, '');
+      } else {
+        // Try to extract country code (1-3 digits after +)
+        const match = cleaned.match(/^(\+\d{1,3})(.*)$/);
+        if (match) {
+          code = match[1];
+          phoneDigits = match[2].replace(/\D/g, '');
+        }
+      }
+    } else {
+      // No + at start
+      if (countryCode) {
+        code = countryCode;
+        phoneDigits = cleaned.replace(/\D/g, '');
+      } else {
+        // No country code, just return cleaned digits
+        return cleaned;
+      }
+    }
+    
+    // If no digits yet, just return country code with space
+    if (!phoneDigits) {
+      return code + ' ';
+    }
+    
+    // Split into groups of 5 digits
+    const formatted = phoneDigits.match(/.{1,5}/g)?.join(' ') || phoneDigits;
+    return `${code} ${formatted}`;
+  };
+
+  // ==================== VALIDATION FUNCTIONS ====================
+  
+  // Validate name
+  const validateName = (name: string): string | null => {
+    if (!name || name.trim() === '') {
+      return 'Name is required';
+    }
+    if (name.length < 2 || name.length > 50) {
+      return 'Name must be between 2 and 50 characters';
+    }
+    if (!/^[a-zA-Z\s'-]+$/.test(name)) {
+      return 'Name can only contain letters, spaces, hyphens, and apostrophes';
+    }
+    return null;
+  };
+
+  // Validate phone number
+  const validatePhoneNumber = (phone: string): string | null => {
+    if (!phone) return null; // Optional field
+    if (!/^\+?[\d\s-()]+$/.test(phone)) {
+      return 'Phone number format is invalid';
+    }
+    const digitsOnly = phone.replace(/\D/g, '');
+    if (digitsOnly.length < 10 || digitsOnly.length > 15) {
+      return 'Phone number must be between 10 and 15 digits';
+    }
+    return null;
+  };
+
+  // Validate date of birth
+  const validateDateOfBirth = (dob: string): string | null => {
+    if (!dob) return null; // Optional field
+    const date = new Date(dob);
+    const now = new Date();
+    const age = now.getFullYear() - date.getFullYear();
+    if (age < 13) {
+      return 'You must be at least 13 years old';
+    }
+    if (age > 120) {
+      return 'Please enter a valid date of birth';
+    }
+    return null;
+  };
+
+  // Validate URL
+  const validateURL = (url: string, fieldName: string): string | null => {
+    if (!url) return null; // Optional field
+    try {
+      new URL(url);
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        return `${fieldName} must start with http:// or https://`;
+      }
+      return null;
+    } catch {
+      return `${fieldName} is not a valid URL`;
+    }
+  };
+
+  // Validate postal code
+  const validatePostalCode = (code: string): string | null => {
+    if (!code) return null; // Optional field
+    if (!/^[A-Z0-9\s-]+$/i.test(code)) {
+      return 'Postal code format is invalid';
+    }
+    if (code.length < 3 || code.length > 10) {
+      return 'Postal code must be between 3 and 10 characters';
+    }
+    return null;
+  };
+
+  // Validate employee ID
+  const validateEmployeeId = (id: string): string | null => {
+    if (!id) return null; // Optional field
+    if (!/^[A-Za-z0-9-_]+$/.test(id)) {
+      return 'Employee ID can only contain letters, numbers, hyphens, and underscores';
+    }
+    if (id.length > 20) {
+      return 'Employee ID cannot exceed 20 characters';
+    }
+    return null;
+  };
+
+  // Validate city/state/country names
+  const validateLocationName = (name: string, fieldName: string): string | null => {
+    if (!name) return null; // Optional field
+    if (name.length < 2 || name.length > 50) {
+      return `${fieldName} must be between 2 and 50 characters`;
+    }
+    if (!/^[a-zA-Z\s-]+$/.test(name)) {
+      return `${fieldName} can only contain letters, spaces, and hyphens`;
+    }
+    return null;
+  };
+
+  // Validate text length
+  const validateLength = (text: string, fieldName: string, min: number, max: number): string | null => {
+    if (!text) return null; // Optional field
+    if (text.length < min || text.length > max) {
+      return `${fieldName} must be between ${min} and ${max} characters`;
+    }
+    return null;
+  };
+
+  // Comprehensive form validation
+  const validateEditForm = (): boolean => {
+    if (!editFormData) return false;
+
+    const errors: Record<string, string> = {};
+
+    // Validate name (required)
+    const nameError = validateName(editFormData.name);
+    if (nameError) errors.name = nameError;
+
+    // Validate personal info (only if values are provided)
+    if (editFormData.personalInfo) {
+      // Only validate phone if it has a value
+      if (editFormData.personalInfo.phoneNumber && editFormData.personalInfo.phoneNumber.trim()) {
+        const phoneError = validatePhoneNumber(editFormData.personalInfo.phoneNumber);
+        if (phoneError) errors['personalInfo.phoneNumber'] = phoneError;
+      }
+
+      // Only validate DOB if it has a value
+      if (editFormData.personalInfo.dateOfBirth && editFormData.personalInfo.dateOfBirth.trim()) {
+        const dobError = validateDateOfBirth(editFormData.personalInfo.dateOfBirth);
+        if (dobError) errors['personalInfo.dateOfBirth'] = dobError;
+      }
+
+      // Only validate nationality if it has a value
+      if (editFormData.personalInfo.nationality && editFormData.personalInfo.nationality.trim()) {
+        const nationalityError = validateLength(editFormData.personalInfo.nationality, 'Nationality', 2, 50);
+        if (nationalityError) errors['personalInfo.nationality'] = nationalityError;
+      }
+    }
+
+    // Validate professional info (only if values are provided)
+    if (editFormData.professionalInfo) {
+      if (editFormData.professionalInfo.occupation && editFormData.professionalInfo.occupation.trim()) {
+        const occupationError = validateLength(editFormData.professionalInfo.occupation, 'Occupation', 2, 100);
+        if (occupationError) errors['professionalInfo.occupation'] = occupationError;
+      }
+
+      if (editFormData.professionalInfo.company && editFormData.professionalInfo.company.trim()) {
+        const companyError = validateLength(editFormData.professionalInfo.company, 'Company', 2, 100);
+        if (companyError) errors['professionalInfo.company'] = companyError;
+      }
+
+      if (editFormData.professionalInfo.department && editFormData.professionalInfo.department.trim()) {
+        const deptError = validateLength(editFormData.professionalInfo.department, 'Department', 0, 50);
+        if (deptError) errors['professionalInfo.department'] = deptError;
+      }
+
+      if (editFormData.professionalInfo.employeeId && editFormData.professionalInfo.employeeId.trim()) {
+        const empIdError = validateEmployeeId(editFormData.professionalInfo.employeeId);
+        if (empIdError) errors['professionalInfo.employeeId'] = empIdError;
+      }
+
+      if (editFormData.professionalInfo.experience && editFormData.professionalInfo.experience.trim()) {
+        const expError = validateLength(editFormData.professionalInfo.experience, 'Experience', 0, 50);
+        if (expError) errors['professionalInfo.experience'] = expError;
+      }
+    }
+
+    // Validate address (only if values are provided)
+    if (editFormData.address) {
+      if (editFormData.address.street && editFormData.address.street.trim()) {
+        const streetError = validateLength(editFormData.address.street, 'Street address', 5, 200);
+        if (streetError) errors['address.street'] = streetError;
+      }
+
+      if (editFormData.address.city && editFormData.address.city.trim()) {
+        const cityError = validateLocationName(editFormData.address.city, 'City');
+        if (cityError) errors['address.city'] = cityError;
+      }
+
+      if (editFormData.address.state && editFormData.address.state.trim()) {
+        const stateError = validateLocationName(editFormData.address.state, 'State');
+        if (stateError) errors['address.state'] = stateError;
+      }
+
+      if (editFormData.address.country && editFormData.address.country.trim()) {
+        const countryError = validateLocationName(editFormData.address.country, 'Country');
+        if (countryError) errors['address.country'] = countryError;
+      }
+
+      if (editFormData.address.postalCode && editFormData.address.postalCode.trim()) {
+        const postalError = validatePostalCode(editFormData.address.postalCode);
+        if (postalError) errors['address.postalCode'] = postalError;
+      }
+    }
+
+    // Validate social profiles (only if values are provided)
+    if (editFormData.socialProfiles) {
+      if (editFormData.socialProfiles.linkedin && editFormData.socialProfiles.linkedin.trim()) {
+        const linkedinError = validateURL(editFormData.socialProfiles.linkedin, 'LinkedIn URL');
+        if (linkedinError) errors['socialProfiles.linkedin'] = linkedinError;
+      }
+
+      if (editFormData.socialProfiles.github && editFormData.socialProfiles.github.trim()) {
+        const githubError = validateURL(editFormData.socialProfiles.github, 'GitHub URL');
+        if (githubError) errors['socialProfiles.github'] = githubError;
+      }
+
+      if (editFormData.socialProfiles.twitter && editFormData.socialProfiles.twitter.trim()) {
+        const twitterError = validateURL(editFormData.socialProfiles.twitter, 'Twitter URL');
+        if (twitterError) errors['socialProfiles.twitter'] = twitterError;
+      }
+
+      if (editFormData.socialProfiles.website && editFormData.socialProfiles.website.trim()) {
+        const websiteError = validateURL(editFormData.socialProfiles.website, 'Website URL');
+        if (websiteError) errors['socialProfiles.website'] = websiteError;
+      }
+    }
+
+    setValidationErrors(errors);
+    
+    // Log validation results
+    if (Object.keys(errors).length > 0) {
+      console.log('❌ Validation failed:', errors);
+    } else {
+      console.log('✅ Validation passed');
+    }
+
+    return Object.keys(errors).length === 0;
+  };
+
+  // Clear validation error for a specific field
+  const clearValidationError = (field: string) => {
+    setValidationErrors(prev => {
+      const newErrors = { ...prev };
+      delete newErrors[field];
+      return newErrors;
+    });
+  };
+
+  // ==================== END VALIDATION FUNCTIONS ====================
 
   // Fetch user profile data from backend
   useEffect(() => {
@@ -1680,12 +2048,14 @@ const UserProfile: React.FC = () => {
     setEditFormData(prev => {
       if (!prev) return prev;
       
+      let updatedData = prev;
+      
       if (section === 'basic') {
-        return { ...prev, [field]: value };
+        updatedData = { ...prev, [field]: value };
       } else {
         const sectionData = prev[section as keyof IUserProfile];
         if (typeof sectionData === 'object' && sectionData !== null) {
-          return {
+          updatedData = {
             ...prev,
             [section]: {
               ...(sectionData as any),
@@ -1693,13 +2063,67 @@ const UserProfile: React.FC = () => {
             }
           };
         }
-        return prev;
       }
+
+      // Auto-format phone number when nationality changes
+      if (section === 'personalInfo' && field === 'nationality') {
+        const countryCode = getCountryCode(value);
+        if (countryCode && updatedData.personalInfo.phoneNumber) {
+          const formattedPhone = formatPhoneNumber(updatedData.personalInfo.phoneNumber, countryCode);
+          updatedData = {
+            ...updatedData,
+            personalInfo: {
+              ...updatedData.personalInfo,
+              phoneNumber: formattedPhone
+            }
+          };
+        } else if (countryCode && !updatedData.personalInfo.phoneNumber) {
+          // Just add country code if phone is empty
+          updatedData = {
+            ...updatedData,
+            personalInfo: {
+              ...updatedData.personalInfo,
+              phoneNumber: countryCode + ' '
+            }
+          };
+        }
+      }
+
+      // Auto-format phone number as user types
+      if (section === 'personalInfo' && field === 'phoneNumber') {
+        const countryCode = getCountryCode(updatedData.personalInfo.nationality);
+        const formattedPhone = formatPhoneNumber(value, countryCode);
+        updatedData = {
+          ...updatedData,
+          personalInfo: {
+            ...updatedData.personalInfo,
+            phoneNumber: formattedPhone
+          }
+        };
+      }
+
+      return updatedData;
     });
+
+    // Clear validation error when user starts typing
+    const errorKey = section === 'basic' ? field : `${section}.${field}`;
+    clearValidationError(errorKey);
   };
 
   const handleSaveEdit = async () => {
     if (!editFormData) return;
+    
+    // Validate form before submitting
+    console.log('🔍 Starting form validation...');
+    const isValid = validateEditForm();
+    
+    if (!isValid) {
+      console.log('❌ Form validation failed');
+      alert('⚠️ Please fix the validation errors before saving');
+      return;
+    }
+
+    console.log('✅ Form validation passed. Submitting to backend...');
     
     try {
       setSaving(true);
@@ -1733,6 +2157,7 @@ const UserProfile: React.FC = () => {
       });
 
       if (response.data.success) {
+        console.log('✅ Profile updated successfully on backend');
         setUserProfile(editFormData);
         
         // Update localStorage
@@ -1742,10 +2167,27 @@ const UserProfile: React.FC = () => {
         
         alert('✅ Profile updated successfully!');
         setShowEditModal(false);
+        setValidationErrors({});
       }
     } catch (error: any) {
-      console.error('Error updating profile:', error);
-      alert(error.response?.data?.message || 'Failed to update profile');
+      console.error('❌ Error updating profile:', error);
+      console.error('Error response:', error.response?.data);
+      
+      // Handle backend validation errors
+      if (error.response?.data?.errors && Array.isArray(error.response.data.errors)) {
+        const backendErrors: Record<string, string> = {};
+        error.response.data.errors.forEach((err: any) => {
+          backendErrors[err.field || err.param] = err.message;
+        });
+        setValidationErrors(backendErrors);
+        alert('⚠️ Validation errors: Please check the form and try again');
+      } else {
+        const errorMessage = error.response?.data?.message 
+          || error.response?.data?.error 
+          || error.message 
+          || 'Failed to update profile';
+        alert(`❌ ${errorMessage}`);
+      }
     } finally {
       setSaving(false);
     }
@@ -2092,7 +2534,10 @@ const UserProfile: React.FC = () => {
               <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-6 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <FaEdit className="w-6 h-6" />
-                  <h2 className="text-2xl font-bold">Edit Profile</h2>
+                  <div>
+                    <h2 className="text-2xl font-bold">Edit Profile</h2>
+                    <p className="text-sm text-white/80 mt-1">Fill in as much or as little as you'd like - only your name is required</p>
+                  </div>
                 </div>
                 <button
                   onClick={() => setShowEditModal(false)}
@@ -2106,6 +2551,20 @@ const UserProfile: React.FC = () => {
 
               {/* Modal Body */}
               <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
+                {/* Info Banner */}
+                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-3">
+                  <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                  </svg>
+                  <div className="flex-1">
+                    <h4 className="text-sm font-semibold text-blue-900 mb-1">Profile is Flexible</h4>
+                    <p className="text-sm text-blue-700">
+                      You can update your profile anytime! Fill in the information you want now, and come back to add more later. 
+                      Only your <strong>name</strong> is required - everything else is optional.
+                    </p>
+                  </div>
+                </div>
+
                 <div className="space-y-8">
                   {/* Basic Information */}
                   <div>
@@ -2115,14 +2574,19 @@ const UserProfile: React.FC = () => {
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Full Name <span className="text-red-500">*</span>
+                        </label>
                         <input
                           type="text"
                           value={editFormData.name}
                           onChange={(e) => handleEditChange('basic', 'name', e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                          className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
+                            validationErrors.name ? 'border-red-500' : 'border-gray-300'
+                          }`}
                           placeholder="Enter your full name"
                         />
+                        <ValidationError message={validationErrors.name} />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
@@ -2132,6 +2596,7 @@ const UserProfile: React.FC = () => {
                           disabled
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
                         />
+                        <p className="text-xs text-gray-500 mt-1">Email cannot be changed</p>
                       </div>
                     </div>
                   </div>
@@ -2141,6 +2606,7 @@ const UserProfile: React.FC = () => {
                     <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
                       <FaUserSecret className="text-indigo-600" />
                       Personal Information
+                      <span className="text-xs text-gray-500 font-normal ml-2">(All Optional)</span>
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
@@ -2149,28 +2615,43 @@ const UserProfile: React.FC = () => {
                           type="date"
                           value={editFormData.personalInfo.dateOfBirth}
                           onChange={(e) => handleEditChange('personalInfo', 'dateOfBirth', e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+                            validationErrors['personalInfo.dateOfBirth'] ? 'border-red-500' : 'border-gray-300'
+                          }`}
                         />
+                        <ValidationError message={validationErrors['personalInfo.dateOfBirth']} />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Phone Number
+                          <span className="text-xs text-gray-400 ml-1 font-normal">(auto-formats with country code)</span>
+                        </label>
                         <input
                           type="tel"
                           value={editFormData.personalInfo.phoneNumber}
                           onChange={(e) => handleEditChange('personalInfo', 'phoneNumber', e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+                            validationErrors['personalInfo.phoneNumber'] ? 'border-red-500' : 'border-gray-300'
+                          }`}
                           placeholder="+1 (555) 000-0000"
                         />
+                        <ValidationError message={validationErrors['personalInfo.phoneNumber']} />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Nationality</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Nationality
+                          <span className="text-xs text-gray-400 ml-1 font-normal">(sets phone country code)</span>
+                        </label>
                         <input
                           type="text"
                           value={editFormData.personalInfo.nationality}
                           onChange={(e) => handleEditChange('personalInfo', 'nationality', e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                          placeholder="Enter your nationality"
+                          className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+                            validationErrors['personalInfo.nationality'] ? 'border-red-500' : 'border-gray-300'
+                          }`}
+                          placeholder="e.g., India, USA, UK"
                         />
+                        <ValidationError message={validationErrors['personalInfo.nationality']} />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Marital Status</label>
@@ -2184,6 +2665,7 @@ const UserProfile: React.FC = () => {
                           <option value="Married">Married</option>
                           <option value="Divorced">Divorced</option>
                           <option value="Widowed">Widowed</option>
+                          <option value="Other">Other</option>
                         </select>
                       </div>
                       <div>
@@ -2197,6 +2679,7 @@ const UserProfile: React.FC = () => {
                           <option value="Male">Male</option>
                           <option value="Female">Female</option>
                           <option value="Other">Other</option>
+                          <option value="Prefer not to say">Prefer not to say</option>
                         </select>
                       </div>
                     </div>
@@ -2207,6 +2690,7 @@ const UserProfile: React.FC = () => {
                     <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
                       <FaBriefcase className="text-indigo-600" />
                       Professional Information
+                      <span className="text-xs text-gray-500 font-normal ml-2">(All Optional)</span>
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
@@ -2215,9 +2699,12 @@ const UserProfile: React.FC = () => {
                           type="text"
                           value={editFormData.professionalInfo.occupation}
                           onChange={(e) => handleEditChange('professionalInfo', 'occupation', e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+                            validationErrors['professionalInfo.occupation'] ? 'border-red-500' : 'border-gray-300'
+                          }`}
                           placeholder="e.g., Software Engineer"
                         />
+                        <ValidationError message={validationErrors['professionalInfo.occupation']} />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Company</label>
@@ -2225,9 +2712,12 @@ const UserProfile: React.FC = () => {
                           type="text"
                           value={editFormData.professionalInfo.company}
                           onChange={(e) => handleEditChange('professionalInfo', 'company', e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+                            validationErrors['professionalInfo.company'] ? 'border-red-500' : 'border-gray-300'
+                          }`}
                           placeholder="Company name"
                         />
+                        <ValidationError message={validationErrors['professionalInfo.company']} />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Department</label>
@@ -2235,9 +2725,12 @@ const UserProfile: React.FC = () => {
                           type="text"
                           value={editFormData.professionalInfo.department}
                           onChange={(e) => handleEditChange('professionalInfo', 'department', e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+                            validationErrors['professionalInfo.department'] ? 'border-red-500' : 'border-gray-300'
+                          }`}
                           placeholder="e.g., Engineering"
                         />
+                        <ValidationError message={validationErrors['professionalInfo.department']} />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Employee ID</label>
@@ -2245,9 +2738,12 @@ const UserProfile: React.FC = () => {
                           type="text"
                           value={editFormData.professionalInfo.employeeId}
                           onChange={(e) => handleEditChange('professionalInfo', 'employeeId', e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+                            validationErrors['professionalInfo.employeeId'] ? 'border-red-500' : 'border-gray-300'
+                          }`}
                           placeholder="EMP123456"
                         />
+                        <ValidationError message={validationErrors['professionalInfo.employeeId']} />
                       </div>
                       <div className="md:col-span-2">
                         <label className="block text-sm font-medium text-gray-700 mb-2">Experience</label>
@@ -2255,9 +2751,12 @@ const UserProfile: React.FC = () => {
                           type="text"
                           value={editFormData.professionalInfo.experience}
                           onChange={(e) => handleEditChange('professionalInfo', 'experience', e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+                            validationErrors['professionalInfo.experience'] ? 'border-red-500' : 'border-gray-300'
+                          }`}
                           placeholder="e.g., 5+ years"
                         />
+                        <ValidationError message={validationErrors['professionalInfo.experience']} />
                       </div>
                     </div>
                   </div>
@@ -2267,6 +2766,7 @@ const UserProfile: React.FC = () => {
                     <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
                       <FaMapMarkerAlt className="text-indigo-600" />
                       Address
+                      <span className="text-xs text-gray-500 font-normal ml-2">(All Optional)</span>
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="md:col-span-2">
@@ -2275,9 +2775,12 @@ const UserProfile: React.FC = () => {
                           type="text"
                           value={editFormData.address.street}
                           onChange={(e) => handleEditChange('address', 'street', e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+                            validationErrors['address.street'] ? 'border-red-500' : 'border-gray-300'
+                          }`}
                           placeholder="123 Main Street"
                         />
+                        <ValidationError message={validationErrors['address.street']} />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">City</label>
@@ -2285,9 +2788,12 @@ const UserProfile: React.FC = () => {
                           type="text"
                           value={editFormData.address.city}
                           onChange={(e) => handleEditChange('address', 'city', e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+                            validationErrors['address.city'] ? 'border-red-500' : 'border-gray-300'
+                          }`}
                           placeholder="City"
                         />
+                        <ValidationError message={validationErrors['address.city']} />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">State/Province</label>
@@ -2295,9 +2801,12 @@ const UserProfile: React.FC = () => {
                           type="text"
                           value={editFormData.address.state}
                           onChange={(e) => handleEditChange('address', 'state', e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+                            validationErrors['address.state'] ? 'border-red-500' : 'border-gray-300'
+                          }`}
                           placeholder="State"
                         />
+                        <ValidationError message={validationErrors['address.state']} />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Country</label>
@@ -2305,9 +2814,12 @@ const UserProfile: React.FC = () => {
                           type="text"
                           value={editFormData.address.country}
                           onChange={(e) => handleEditChange('address', 'country', e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+                            validationErrors['address.country'] ? 'border-red-500' : 'border-gray-300'
+                          }`}
                           placeholder="Country"
                         />
+                        <ValidationError message={validationErrors['address.country']} />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Postal Code</label>
@@ -2315,9 +2827,12 @@ const UserProfile: React.FC = () => {
                           type="text"
                           value={editFormData.address.postalCode}
                           onChange={(e) => handleEditChange('address', 'postalCode', e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+                            validationErrors['address.postalCode'] ? 'border-red-500' : 'border-gray-300'
+                          }`}
                           placeholder="12345"
                         />
+                        <ValidationError message={validationErrors['address.postalCode']} />
                       </div>
                     </div>
                   </div>
@@ -2327,6 +2842,7 @@ const UserProfile: React.FC = () => {
                     <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
                       <FaGlobe className="text-indigo-600" />
                       Social Profiles
+                      <span className="text-xs text-gray-500 font-normal ml-2">(All Optional)</span>
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
@@ -2337,9 +2853,12 @@ const UserProfile: React.FC = () => {
                           type="url"
                           value={editFormData.socialProfiles.linkedin}
                           onChange={(e) => handleEditChange('socialProfiles', 'linkedin', e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+                            validationErrors['socialProfiles.linkedin'] ? 'border-red-500' : 'border-gray-300'
+                          }`}
                           placeholder="https://linkedin.com/in/username"
                         />
+                        <ValidationError message={validationErrors['socialProfiles.linkedin']} />
                       </div>
                       <div>
                         <label className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
@@ -2349,9 +2868,12 @@ const UserProfile: React.FC = () => {
                           type="url"
                           value={editFormData.socialProfiles.github}
                           onChange={(e) => handleEditChange('socialProfiles', 'github', e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+                            validationErrors['socialProfiles.github'] ? 'border-red-500' : 'border-gray-300'
+                          }`}
                           placeholder="https://github.com/username"
                         />
+                        <ValidationError message={validationErrors['socialProfiles.github']} />
                       </div>
                       <div>
                         <label className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
@@ -2361,9 +2883,12 @@ const UserProfile: React.FC = () => {
                           type="url"
                           value={editFormData.socialProfiles.twitter}
                           onChange={(e) => handleEditChange('socialProfiles', 'twitter', e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+                            validationErrors['socialProfiles.twitter'] ? 'border-red-500' : 'border-gray-300'
+                          }`}
                           placeholder="https://twitter.com/username"
                         />
+                        <ValidationError message={validationErrors['socialProfiles.twitter']} />
                       </div>
                       <div>
                         <label className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
@@ -2373,9 +2898,12 @@ const UserProfile: React.FC = () => {
                           type="url"
                           value={editFormData.socialProfiles.website}
                           onChange={(e) => handleEditChange('socialProfiles', 'website', e.target.value)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+                            validationErrors['socialProfiles.website'] ? 'border-red-500' : 'border-gray-300'
+                          }`}
                           placeholder="https://yourwebsite.com"
                         />
+                        <ValidationError message={validationErrors['socialProfiles.website']} />
                       </div>
                     </div>
                   </div>

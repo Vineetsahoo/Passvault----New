@@ -29,7 +29,11 @@ api.interceptors.response.use(
   (error) => {
     if (error.response) {
       // Server responded with error status
-      const { status, data } = error.response;
+      const { status, data, config } = error.response;
+
+      // Skip logging 404 errors for terminal-qr endpoints (expected when sessions are cleaned up)
+      const isTerminalQrEndpoint = config?.url?.includes('terminal-qr');
+      const is404 = status === 404;
 
       switch (status) {
         case 401:
@@ -41,7 +45,16 @@ api.interceptors.response.use(
           console.error('Forbidden:', data.message);
           break;
         case 404:
-          console.error('Not found:', data.message);
+          // Don't log 404s for terminal-qr endpoints (sessions get cleaned up)
+          if (!isTerminalQrEndpoint) {
+            console.error('Not found:', data.message);
+          }
+          break;
+        case 410:
+          // Gone - Resource no longer available (used for expired sessions)
+          if (!isTerminalQrEndpoint) {
+            console.error('Resource expired:', data.message);
+          }
           break;
         case 429:
           console.error('Rate limit exceeded:', data.message);
@@ -291,6 +304,31 @@ export const qrCodesAPI = {
   deleteCode: (id: string) => api.delete(`/qrcodes/${id}`),
 
   generateQR: (id: string) => api.get(`/qrcodes/${id}/generate`),
+};
+
+// Terminal QR API
+export const terminalQrAPI = {
+  // Generate a new terminal QR session
+  generateSession: (data: {
+    passType: string;
+    passData: any;
+    expirySeconds?: number;
+  }) => api.post('/terminal-qr/generate', data),
+
+  // Check status of a session (for polling)
+  getSessionStatus: (sessionId: string) => 
+    api.get(`/terminal-qr/status/${sessionId}`),
+
+  // Process a scanned QR code
+  scanQRCode: (qrData: string | object) => 
+    api.post('/terminal-qr/scan', { qrData }),
+
+  // Cancel an active session
+  cancelSession: (sessionId: string) => 
+    api.delete(`/terminal-qr/cancel/${sessionId}`),
+
+  // Get all active sessions for current user
+  getActiveSessions: () => api.get('/terminal-qr/sessions'),
 };
 
 // Utility functions
