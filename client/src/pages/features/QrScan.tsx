@@ -1370,6 +1370,102 @@ const QrScan = () => {
   const creditCards = cards.filter(card => card.type === 'credit' || card.type === 'debit');
   const passes = cards.filter(card => card.type === 'pass' || card.type === 'membership');
 
+  // Delete all passes function
+  const deleteAllPasses = async () => {
+    if (!auth.isAuthenticated) {
+      alert('Please sign in to delete passes');
+      return;
+    }
+
+    const passesCount = passes.length;
+    if (passesCount === 0) {
+      alert('No passes to delete');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Are you sure you want to delete ALL ${passesCount} passes/memberships?\n\nThis action cannot be undone!`
+    );
+
+    if (!confirmed) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      console.log(`🗑️ Deleting ${passesCount} passes...`);
+      
+      // Delete all passes one by one
+      const deletePromises = passes.map(pass => 
+        qrcodeService.deleteQRCode(pass.id).catch(err => {
+          console.error(`Failed to delete pass ${pass.title}:`, err);
+          return null; // Continue even if one fails
+        })
+      );
+
+      await Promise.all(deletePromises);
+
+      console.log('✅ All passes deleted successfully');
+      
+      // Refresh the list
+      await fetchQRCodes();
+      
+      alert(`✅ Successfully deleted ${passesCount} passes!`);
+    } catch (err: any) {
+      console.error('❌ Error deleting passes:', err);
+      setError(err.response?.data?.message || 'Failed to delete passes');
+      alert('Error deleting passes. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Delete all cards function
+  const deleteAllCards = async () => {
+    const cardsCount = creditCards.length;
+    
+    if (cardsCount === 0) {
+      alert('No cards to delete');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `⚠️ Are you sure you want to delete ALL ${cardsCount} cards?\n\nThis action cannot be undone!`
+    );
+
+    if (!confirmed) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      console.log(`🗑️ Deleting ${cardsCount} cards...`);
+      
+      // Delete all cards one by one
+      const deletePromises = creditCards.map(card => 
+        qrcodeService.deleteQRCode(card.id).catch(err => {
+          console.error(`Failed to delete card ${card.title}:`, err);
+          return null; // Continue even if one fails
+        })
+      );
+
+      await Promise.all(deletePromises);
+
+      console.log('✅ All cards deleted successfully');
+      
+      // Refresh the list
+      await fetchQRCodes();
+      
+      alert(`✅ Successfully deleted ${cardsCount} cards!`);
+    } catch (err: any) {
+      console.error('❌ Error deleting cards:', err);
+      setError(err.response?.data?.message || 'Failed to delete cards');
+      alert('Error deleting cards. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Cards section
   const cardsSection = auth.isAuthenticated ? (
     <div className="bg-white border border-slate-200/60 rounded-xl shadow-lg overflow-hidden">
@@ -1378,8 +1474,21 @@ const QrScan = () => {
           <CreditCard className="h-5 w-5 text-indigo-600" />
           Credit & Debit Cards
         </h3>
-        <div className="text-sm bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full">
-          {creditCards.length} Cards
+        <div className="flex items-center gap-2">
+          <div className="text-sm bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full">
+            {creditCards.length} Cards
+          </div>
+          {creditCards.length > 0 && (
+            <button
+              onClick={deleteAllCards}
+              disabled={loading}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Delete all cards"
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete All
+            </button>
+          )}
         </div>
       </div>
       
@@ -1457,8 +1566,21 @@ const QrScan = () => {
           <Layers className="h-5 w-5 text-emerald-600" />
           Passes & Memberships
         </h3>
-        <div className="text-sm bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full">
-          {passes.length} Passes
+        <div className="flex items-center gap-2">
+          <div className="text-sm bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full">
+            {passes.length} Passes
+          </div>
+          {passes.length > 0 && (
+            <button
+              onClick={deleteAllPasses}
+              disabled={loading}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Delete all passes"
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete All
+            </button>
+          )}
         </div>
       </div>
       

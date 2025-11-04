@@ -159,14 +159,13 @@ const TerminalQrScanner: React.FC<TerminalQrScannerProps> = ({ onScanSuccess }) 
         if (err.response?.status === 404 || err.response?.status === 410) {
           console.log('✅ Session completed (410/404) - Pass was created successfully');
           setSession({ ...session, status: 'scanned' });
-          setSuccess('✅ Pass created successfully! Check your QR Scan page.');
+          setSuccess('✅ Pass created successfully! Refreshing your passes...');
           setError(null);
           
-          // Keep success message visible longer
+          // Trigger page refresh after showing success message
           setTimeout(() => {
-            setSession(null);
-            setSuccess(null);
-          }, 5000);
+            window.location.reload();
+          }, 3000);
         } else {
           // Only show errors for other issues
           console.error('❌ Error polling session:', err);
