@@ -1037,20 +1037,136 @@ const BillingSection: React.FC<{
   billing: IUserProfile['billing']; 
   onAddPaymentMethod: (data: any) => Promise<boolean>;
   onDeletePaymentMethod: (methodId: string) => void;
-}> = ({ billing, onAddPaymentMethod, onDeletePaymentMethod }) => {
+  userName: string; // Add userName prop
+}> = ({ billing, onAddPaymentMethod, onDeletePaymentMethod, userName }) => {
   const [showAddCard, setShowAddCard] = useState(false);
   const [cardData, setCardData] = useState({
     type: 'credit',
     provider: 'visa',
     lastFour: '',
     expiryDate: '',
-    cardHolderName: '',
+    cardHolderName: userName, // Auto-fill with user's name
     isDefault: false
   });
+  const [cardErrors, setCardErrors] = useState<Record<string, string>>({});
+
+  // Auto-fill cardholder name when userName changes or card form opens
+  useEffect(() => {
+    if (showAddCard && userName) {
+      setCardData(prev => ({
+        ...prev,
+        cardHolderName: userName
+      }));
+    }
+  }, [showAddCard, userName]);
+
+  // Validation functions
+  const validateCardHolderName = (name: string): string | null => {
+    if (!name || name.trim() === '') {
+      return 'Cardholder name is required';
+    }
+    if (name.length < 3 || name.length > 50) {
+      return 'Name must be between 3 and 50 characters';
+    }
+    if (!/^[a-zA-Z\s'-]+$/.test(name)) {
+      return 'Name can only contain letters, spaces, hyphens, and apostrophes';
+    }
+    return null;
+  };
+
+  const validateLastFourDigits = (digits: string): string | null => {
+    if (!digits || digits.trim() === '') {
+      return 'Last 4 digits are required';
+    }
+    if (!/^\d{4}$/.test(digits)) {
+      return 'Must be exactly 4 digits';
+    }
+    return null;
+  };
+
+  const validateExpiryDate = (expiry: string): string | null => {
+    if (!expiry || expiry.trim() === '') {
+      return 'Expiry date is required';
+    }
+    
+    // Check format MM/YY
+    const expiryPattern = /^(0[1-9]|1[0-2])\/([0-9]{2})$/;
+    if (!expiryPattern.test(expiry)) {
+      return 'Invalid format. Use MM/YY (e.g., 12/25)';
+    }
+
+    // Check if card is not expired
+    const [month, year] = expiry.split('/').map(Number);
+    const currentDate = new Date();
+    const currentYear = currentDate.getFullYear() % 100; // Get last 2 digits
+    const currentMonth = currentDate.getMonth() + 1;
+
+    if (year < currentYear || (year === currentYear && month < currentMonth)) {
+      return 'Card has expired';
+    }
+
+    // Check if expiry is not too far in future (max 20 years)
+    if (year > currentYear + 20) {
+      return 'Expiry date is too far in the future';
+    }
+
+    return null;
+  };
+
+  // Format expiry date as user types
+  const handleExpiryChange = (value: string) => {
+    // Remove all non-digit characters
+    let cleaned = value.replace(/\D/g, '');
+    
+    // Limit to 4 digits (MMYY)
+    cleaned = cleaned.slice(0, 4);
+    
+    // Auto-format with slash
+    if (cleaned.length >= 2) {
+      cleaned = cleaned.slice(0, 2) + '/' + cleaned.slice(2);
+    }
+    
+    setCardData({ ...cardData, expiryDate: cleaned });
+    
+    // Clear error when user starts typing
+    if (cardErrors.expiryDate) {
+      setCardErrors(prev => ({ ...prev, expiryDate: '' }));
+    }
+  };
+
+  // Clear error when field is changed
+  const clearError = (field: string) => {
+    setCardErrors(prev => ({ ...prev, [field]: '' }));
+  };
+
+  const validateCardForm = (): boolean => {
+    const errors: Record<string, string> = {};
+
+    const nameError = validateCardHolderName(cardData.cardHolderName);
+    if (nameError) errors.cardHolderName = nameError;
+
+    const lastFourError = validateLastFourDigits(cardData.lastFour);
+    if (lastFourError) errors.lastFour = lastFourError;
+
+    const expiryError = validateExpiryDate(cardData.expiryDate);
+    if (expiryError) errors.expiryDate = expiryError;
+
+    setCardErrors(errors);
+
+    if (Object.keys(errors).length > 0) {
+      console.log('❌ Card validation failed:', errors);
+      return false;
+    }
+
+    console.log('✅ Card validation passed');
+    return true;
+  };
 
   const handleAddCard = async () => {
-    if (!cardData.lastFour || !cardData.expiryDate || !cardData.cardHolderName) {
-      alert('Please fill all card details');
+    console.log('🔍 Validating card form...');
+    
+    if (!validateCardForm()) {
+      alert('⚠️ Please fix the validation errors before adding the card');
       return;
     }
 
@@ -1062,9 +1178,10 @@ const BillingSection: React.FC<{
         provider: 'visa',
         lastFour: '',
         expiryDate: '',
-        cardHolderName: '',
+        cardHolderName: userName, // Reset to user's name
         isDefault: false
       });
+      setCardErrors({}); // Clear errors
     }
   };
 
@@ -1117,38 +1234,64 @@ const BillingSection: React.FC<{
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Card Holder Name</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Card Holder Name <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="text"
                   value={cardData.cardHolderName}
-                  onChange={(e) => setCardData({ ...cardData, cardHolderName: e.target.value })}
+                  onChange={(e) => {
+                    setCardData({ ...cardData, cardHolderName: e.target.value });
+                    clearError('cardHolderName');
+                  }}
                   placeholder="John Doe"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+                    cardErrors.cardHolderName ? 'border-red-500' : 'border-gray-300'
+                  }`}
                 />
+                {cardErrors.cardHolderName && (
+                  <ValidationError message={cardErrors.cardHolderName} />
+                )}
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Last 4 Digits</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Last 4 Digits <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="text"
                   value={cardData.lastFour}
                   onChange={(e) => {
                     const val = e.target.value.replace(/\D/g, '').slice(0, 4);
                     setCardData({ ...cardData, lastFour: val });
+                    clearError('lastFour');
                   }}
                   placeholder="1234"
                   maxLength={4}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+                    cardErrors.lastFour ? 'border-red-500' : 'border-gray-300'
+                  }`}
                 />
+                {cardErrors.lastFour && (
+                  <ValidationError message={cardErrors.lastFour} />
+                )}
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Expiry Date (MM/YY)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Expiry Date (MM/YY) <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="text"
                   value={cardData.expiryDate}
-                  onChange={(e) => setCardData({ ...cardData, expiryDate: e.target.value })}
+                  onChange={(e) => handleExpiryChange(e.target.value)}
                   placeholder="12/25"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  maxLength={5}
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+                    cardErrors.expiryDate ? 'border-red-500' : 'border-gray-300'
+                  }`}
                 />
+                {cardErrors.expiryDate && (
+                  <ValidationError message={cardErrors.expiryDate} />
+                )}
               </div>
               <div className="flex items-center">
                 <label className="flex items-center gap-2 cursor-pointer">
@@ -2381,6 +2524,7 @@ const UserProfile: React.FC = () => {
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 20 }}
                 transition={{ duration: 0.3 }}
+                className="space-y-6"
               >
                 <ProfileSection title="My Documents" icon={<FaFileAlt className="w-5 h-5 text-indigo-600" />}>
                   <DocumentsSection 
@@ -2406,6 +2550,7 @@ const UserProfile: React.FC = () => {
                     billing={userProfile.billing}
                     onAddPaymentMethod={handleAddPaymentMethod}
                     onDeletePaymentMethod={handleDeletePaymentMethod}
+                    userName={userProfile.name}
                   />
                 </ProfileSection>
               </motion.div>
