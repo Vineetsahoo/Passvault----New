@@ -255,6 +255,76 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
+// @route   GET /api/devices/stats
+// @desc    Get device statistics (alias for /stats/overview)
+// @access  Private
+// NOTE: This must come BEFORE /:id route to avoid route collision
+router.get('/stats', authenticateToken, async (req, res) => {
+  try {
+    logger.info(`Fetching device stats for user ${req.user.userId}`);
+    
+    const stats = await Device.aggregate([
+      { $match: { userId: req.user.userId } },
+      {
+        $facet: {
+          statusBreakdown: [
+            {
+              $group: {
+                _id: '$status',
+                count: { $sum: 1 }
+              }
+            }
+          ],
+          typeBreakdown: [
+            {
+              $group: {
+                _id: '$deviceType',
+                count: { $sum: 1 }
+              }
+            }
+          ],
+          recentActivity: [
+            { $sort: { lastActiveAt: -1 } },
+            { $limit: 5 },
+            {
+              $project: {
+                deviceName: 1,
+                deviceType: 1,
+                lastActiveAt: 1,
+                status: 1
+              }
+            }
+          ],
+          syncStats: [
+            {
+              $group: {
+                _id: null,
+                avgSyncEnabled: { $avg: { $cond: ['$syncEnabled', 1, 0] } },
+                trustedDevices: { $sum: { $cond: ['$isTrusted', 1, 0] } }
+              }
+            }
+          ]
+        }
+      }
+    ]);
+
+    logger.info(`Stats fetched successfully for user ${req.user.userId}`);
+
+    res.json({
+      success: true,
+      stats: stats[0]
+    });
+
+  } catch (error) {
+    logger.error('Error fetching device stats:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching statistics',
+      error: error.message
+    });
+  }
+});
+
 // @route   GET /api/devices/stats/overview
 // @desc    Get device statistics
 // @access  Private
