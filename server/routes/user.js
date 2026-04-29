@@ -527,6 +527,49 @@ router.get('/stats', async (req, res) => {
   }
 });
 
+// @route   GET /api/user/export
+// @desc    Export all user data
+// @access  Private
+router.get('/export', async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const Password = (await import('../models/Password.js')).default;
+    const passwords = await Password.find({ userId: req.user.userId });
+    
+    // Decrypt passwords for the export
+    const decryptedPasswords = passwords.map(p => {
+      const data = p.toJSON();
+      if (p.encryptedPassword) {
+        data.password = p.decryptPassword();
+      }
+      delete data.encryptedPassword;
+      return data;
+    });
+
+    const SecureDocument = (await import('../models/SecureDocument.js')).default;
+    const documents = await SecureDocument.find({ userId: req.user.userId }).select('-encryptionKey');
+
+    const exportData = {
+      profile: user.toJSON(),
+      passwords: decryptedPasswords,
+      documents: documents,
+      exportDate: new Date()
+    };
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', 'attachment; filename="passvault-export.json"');
+    res.send(JSON.stringify(exportData, null, 2));
+
+  } catch (error) {
+    logger.error('Export data error:', error);
+    res.status(500).json({ success: false, message: 'Failed to export data' });
+  }
+});
+
 // @route   POST /api/user/sessions/revoke
 // @desc    Revoke all active sessions except current
 // @access  Private

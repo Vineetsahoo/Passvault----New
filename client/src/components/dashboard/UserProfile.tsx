@@ -1417,6 +1417,13 @@ const UserProfile: React.FC = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deletePassword, setDeletePassword] = useState('');
+  const [actionLoading, setActionLoading] = useState(false);
+  
   const [userProfile, setUserProfile] = useState<IUserProfile>({
     name: '',
     email: '',
@@ -2435,6 +2442,91 @@ const UserProfile: React.FC = () => {
     }
   };
 
+  // Action Handlers
+  const handleExportData = async () => {
+    try {
+      const token = localStorage.getItem('accessToken');
+      if (!token) return;
+
+      const response = await axios.get(`${API_URL}/user/export`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        responseType: 'blob'
+      });
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'passvault-export.json');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Export data error:', error);
+      alert('Failed to export data');
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      alert('Passwords do not match');
+      return;
+    }
+    
+    setActionLoading(true);
+    try {
+      const token = localStorage.getItem('accessToken');
+      if (!token) return;
+
+      await axios.put(`${API_URL}/user/password`, {
+        currentPassword: passwordForm.currentPassword,
+        newPassword: passwordForm.newPassword,
+        confirmPassword: passwordForm.confirmPassword
+      }, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      alert('Password changed successfully. Please log in again.');
+      setShowPasswordModal(false);
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      localStorage.removeItem('accessToken');
+      window.location.href = '/signin';
+    } catch (error: any) {
+      console.error('Change password error:', error);
+      alert(error.response?.data?.message || 'Failed to change password');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeleteAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (deleteConfirmText !== 'DELETE') {
+      alert('Please type DELETE to confirm');
+      return;
+    }
+    
+    setActionLoading(true);
+    try {
+      const token = localStorage.getItem('accessToken');
+      if (!token) return;
+
+      await axios.delete(`${API_URL}/user/account`, {
+        data: { password: deletePassword, confirmDelete: deleteConfirmText },
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      alert('Account deleted successfully');
+      localStorage.removeItem('accessToken');
+      window.location.href = '/signin';
+    } catch (error: any) {
+      console.error('Delete account error:', error);
+      alert(error.response?.data?.message || 'Failed to delete account');
+      setActionLoading(false);
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
       <UserProfileHeader profile={userProfile} onEditClick={handleEditClick} />
@@ -2603,6 +2695,7 @@ const UserProfile: React.FC = () => {
               <motion.button
                 whileHover={{ scale: 1.02, x: 5 }}
                 whileTap={{ scale: 0.98 }}
+                onClick={handleExportData}
                 className="w-full flex items-center justify-between p-3.5 bg-gray-50 rounded-xl hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
               >
                 <div className="flex items-center gap-2.5">
@@ -2615,6 +2708,7 @@ const UserProfile: React.FC = () => {
               <motion.button
                 whileHover={{ scale: 1.02, x: 5 }}
                 whileTap={{ scale: 0.98 }}
+                onClick={() => setShowPasswordModal(true)}
                 className="w-full flex items-center justify-between p-3.5 bg-gray-50 rounded-xl hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
               >
                 <div className="flex items-center gap-2.5">
@@ -2627,6 +2721,7 @@ const UserProfile: React.FC = () => {
               <motion.button
                 whileHover={{ scale: 1.02, x: 5 }}
                 whileTap={{ scale: 0.98 }}
+                onClick={() => setShowDeleteModal(true)}
                 className="w-full flex items-center justify-between p-3.5 bg-gray-50 rounded-xl hover:bg-red-50 hover:text-red-700 transition-colors"
               >
                 <div className="flex items-center gap-2.5">
@@ -3081,6 +3176,128 @@ const UserProfile: React.FC = () => {
                   )}
                 </button>
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Change Password Modal */}
+        {showPasswordModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden"
+            >
+              <form onSubmit={handleChangePassword}>
+                <div className="p-6">
+                  <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                    <FaKey className="text-indigo-600" /> Change Password
+                  </h3>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Current Password</label>
+                      <input 
+                        type="password"
+                        required
+                        value={passwordForm.currentPassword}
+                        onChange={e => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
+                      <input 
+                        type="password"
+                        required
+                        minLength={8}
+                        value={passwordForm.newPassword}
+                        onChange={e => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Confirm New Password</label>
+                      <input 
+                        type="password"
+                        required
+                        value={passwordForm.confirmPassword}
+                        onChange={e => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-6 flex justify-end gap-3">
+                    <button type="button" onClick={() => setShowPasswordModal(false)} className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition">Cancel</button>
+                    <button type="submit" disabled={actionLoading} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">
+                      {actionLoading ? 'Saving...' : 'Update Password'}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Delete Account Modal */}
+        {showDeleteModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden"
+            >
+              <form onSubmit={handleDeleteAccount}>
+                <div className="p-6">
+                  <h3 className="text-lg font-bold text-red-600 mb-4 flex items-center gap-2">
+                    <FaTrash /> Delete Account
+                  </h3>
+                  <div className="bg-red-50 text-red-700 p-4 rounded-lg text-sm mb-4">
+                    <strong>Warning:</strong> This action is permanent. All your data, passwords, and documents will be securely erased and cannot be recovered.
+                  </div>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Account Password</label>
+                      <input 
+                        type="password"
+                        required
+                        value={deletePassword}
+                        onChange={e => setDeletePassword(e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500"
+                        placeholder="Enter password to confirm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Type "DELETE" to confirm</label>
+                      <input 
+                        type="text"
+                        required
+                        value={deleteConfirmText}
+                        onChange={e => setDeleteConfirmText(e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500"
+                        placeholder="DELETE"
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-6 flex justify-end gap-3">
+                    <button type="button" onClick={() => setShowDeleteModal(false)} className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition">Cancel</button>
+                    <button type="submit" disabled={actionLoading || deleteConfirmText !== 'DELETE'} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition">
+                      {actionLoading ? 'Deleting...' : 'Permanently Delete'}
+                    </button>
+                  </div>
+                </div>
+              </form>
             </motion.div>
           </motion.div>
         )}
