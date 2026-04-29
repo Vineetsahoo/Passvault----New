@@ -331,6 +331,82 @@ export const terminalQrAPI = {
   getActiveSessions: () => api.get('/terminal-qr/sessions'),
 };
 
+// Devices API
+export const deviceAPI = {
+  getDevices: (params?: { page?: number; limit?: number }) =>
+    api.get('/devices', { params }),
+
+  getDevice: (id: string) => api.get(`/devices/${id}`),
+
+  registerDevice: (data: {
+    name: string;
+    type: string;
+    osVersion?: string;
+    appVersion?: string;
+  }) => api.post('/devices', data),
+
+  updateDevice: (id: string, data: any) => api.put(`/devices/${id}`, data),
+
+  removeDevice: (id: string) => api.delete(`/devices/${id}`),
+
+  getDeviceStats: () => api.get('/devices/stats'),
+
+  setTrusted: (id: string) => api.post(`/devices/${id}/trust`),
+
+  getActive: () => api.get('/devices/active'),
+};
+
+// Backup API
+export const backupAPI = {
+  getBackups: (params?: { page?: number; limit?: number; type?: string }) =>
+    api.get('/backups', { params }),
+
+  getBackup: (id: string) => api.get(`/backups/${id}`),
+
+  createBackup: (data?: { type?: string; tags?: string[] }) =>
+    api.post('/backups', data),
+
+  restoreBackup: (id: string, data?: { selectiveRestore?: string[] }) =>
+    api.post(`/backups/${id}/restore`, data),
+
+  deleteBackup: (id: string) => api.delete(`/backups/${id}`),
+
+  getBackupStats: () => api.get('/backups/stats'),
+
+  scheduleBackup: (data: {
+    frequency: 'daily' | 'weekly' | 'monthly';
+    time?: string;
+    enabled: boolean;
+  }) => api.post('/backups/schedule', data),
+
+  getSchedule: () => api.get('/backups/schedule'),
+
+  getLastBackup: () => api.get('/backups/last'),
+};
+
+// Documents API
+export const documentAPI = {
+  getDocuments: (params?: { page?: number; limit?: number; category?: string }) =>
+    api.get('/documents', { params }),
+
+  getDocument: (id: string) => api.get(`/documents/${id}`),
+
+  uploadDocument: (data: FormData) =>
+    api.post('/documents/upload', data, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+
+  deleteDocument: (id: string) => api.delete(`/documents/${id}`),
+
+  shareDocument: (id: string, data: any) =>
+    api.post(`/documents/${id}/share`, data),
+
+  getDocumentStats: () => api.get('/documents/stats'),
+
+  searchDocuments: (query: string) =>
+    api.get('/documents/search', { params: { query } }),
+};
+
 // Utility functions
 export const isLoggedIn = (): boolean => {
   const token = localStorage.getItem('accessToken');

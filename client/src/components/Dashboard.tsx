@@ -23,45 +23,7 @@ import {
   FaSave, FaPalette, FaEyeSlash, FaEye, FaToggleOn, FaToggleOff, FaInfoCircle
 } from 'react-icons/fa';
 import { FaSquarePollHorizontal, FaEllipsis } from 'react-icons/fa6';
-
-// Mock Dashboard Service
-interface LogActivityData {
-  eventType: string;
-  description: string;
-  passType: string;
-  severity: 'low' | 'medium' | 'high';
-}
-
-interface MockDashboardServiceType {
-  logActivity: (activityData: LogActivityData) => Promise<{ success: boolean }>;
-  getDashboardStats: () => Promise<DashboardStats>;
-}
-
-const MockDashboardService: MockDashboardServiceType = {
-  logActivity: async (activityData: LogActivityData): Promise<{ success: boolean }> => {
-    console.log('Mock activity logged:', activityData);
-    return { success: true };
-  },
-  
-  getDashboardStats: async (): Promise<DashboardStats> => {
-    return {
-      totalPasswords: 156,
-      strongPasswords: 120,
-      weakPasswords: 26,
-      reusedPasswords: 10,
-      securityScore: 85,
-      breachedAccounts: 2,
-      lastBackup: '2023-12-04 10:30 AM',
-      profileCompletion: 75,
-      passwordsExpiringSoon: 5,
-      lastPasswordChange: '2023-12-03',
-      securityIncidents: 2,
-      masterPasswordStrength: 92,
-      twoFactorEnabled: true,
-      credentialsShared: 8
-    };
-  }
-};
+import { monitoringAPI, historyAPI, deviceAPI, backupAPI, sharingAPI } from '../services/api';
 
 interface SubMenuItem {
   label: string;
@@ -1764,72 +1726,22 @@ const Dashboard = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showNotifications, setShowNotifications] = useState(false);
   const [dashboardStats, setDashboardStats] = useState<DashboardStats>({
-    totalPasswords: 156,
-    strongPasswords: 120,
-    weakPasswords: 26,
-    reusedPasswords: 10,
-    securityScore: 85,
-    breachedAccounts: 2,
-    lastBackup: '2023-12-04 10:30 AM',
-    profileCompletion: 75,
-    passwordsExpiringSoon: 5,
-    lastPasswordChange: '2023-12-03',
-    securityIncidents: 2,
-    masterPasswordStrength: 92,
-    twoFactorEnabled: true,
-    credentialsShared: 8
+    totalPasswords: 0,
+    strongPasswords: 0,
+    weakPasswords: 0,
+    reusedPasswords: 0,
+    securityScore: 0,
+    breachedAccounts: 0,
+    lastBackup: 'Never',
+    profileCompletion: 0,
+    passwordsExpiringSoon: 0,
+    lastPasswordChange: 'Never',
+    securityIncidents: 0,
+    masterPasswordStrength: 0,
+    twoFactorEnabled: false,
+    credentialsShared: 0
   });
-  const [recentActivities] = useState<ActivityItem[]>([
-    {
-      id: '1',
-      type: 'login',
-      title: 'New Login Detected',
-      description: 'New login from Chrome on Windows 11',
-      timestamp: '2 minutes ago',
-      icon: FaUserSecret
-    },
-    {
-      id: '2',
-      type: 'password_change',
-      title: 'Password Updated',
-      description: 'Password for "Netflix Account" was changed',
-      timestamp: '1 hour ago',
-      icon: FaKey
-    },
-    {
-      id: '3',
-      type: 'security_alert',
-      title: 'Security Alert',
-      description: 'Potential data breach detected for your GitHub account',
-      timestamp: '3 hours ago',
-      icon: FaExclamationTriangle,
-      severity: 'high'
-    },
-    {
-      id: '4',
-      type: 'sync',
-      title: 'Sync Completed',
-      description: 'Successfully synced 156 passwords across devices',
-      timestamp: '5 hours ago',
-      icon: FaSync
-    },
-    {
-      id: '5',
-      type: 'share',
-      title: 'Credential Shared',
-      description: 'Wi-Fi password shared with "Home Group"',
-      timestamp: '1 day ago',
-      icon: FaFileContract
-    },
-    {
-      id: '6',
-      type: 'backup',
-      title: 'Backup Created',
-      description: 'Automatic backup completed successfully',
-      timestamp: '1 day ago',
-      icon: FaDatabase
-    }
-  ]);
+  const [recentActivities, setRecentActivities] = useState<ActivityItem[]>([]);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -1883,8 +1795,8 @@ const Dashboard = () => {
     { icon: FaCog, label: 'Settings', path: 'settings', component: <Settings /> },
     { 
       icon: FaFileImport, 
-      label: 'Transcation', 
-      path: 'transcation',
+      label: 'Transactions', 
+      path: 'transactions',
       description: 'View your transactions',
       component: <Transactions />
     },
@@ -1993,13 +1905,109 @@ const Dashboard = () => {
       }
 
       try {
-        const dashboardData = await MockDashboardService.getDashboardStats();
-        setDashboardStats(prev => ({
-          ...prev,
-          ...dashboardData
-        }));
+        // Fetch real dashboard data from API
+        const dashboardResponse = await monitoringAPI.getDashboard('week');
+        const userData = localStorage.getItem('userData');
+        const parsedUserData = userData ? JSON.parse(userData) : {};
+        
+        // Fetch additional data in parallel
+        const [devicesResponse, sharingResponse] = await Promise.allSettled([
+          deviceAPI.getDeviceStats().catch(() => null),
+          sharingAPI.getStats().catch(() => null),
+        ]);
+        
+        if (dashboardResponse.data?.data) {
+          const apiData = dashboardResponse.data.data;
+          
+          // Calculate profile completion based on user data
+          let profileCompletion = 0;
+          if (parsedUserData.name) profileCompletion += 20;
+          if (parsedUserData.email) profileCompletion += 20;
+          if (parsedUserData.twoFactorEnabled) profileCompletion += 20;
+          if (parsedUserData.recoveryEmail) profileCompletion += 20;
+          if (parsedUserData.masterPassword) profileCompletion += 20;
+          
+          // Calculate strong passwords percentage
+          const totalPasswords = apiData.overview?.totalPasswords || 0;
+          const strongCount = Math.round((apiData.security?.score || 0) / 100 * totalPasswords);
+          
+          // Get device stats from response
+          let devicesStats = { activeDevices: 0, totalDevices: 0 };
+          if (devicesResponse.status === 'fulfilled' && devicesResponse.value?.data) {
+            devicesStats = devicesResponse.value.data;
+          }
+          
+          // Get sharing stats from response
+          let sharingStats = { sharedCount: 0 };
+          if (sharingResponse.status === 'fulfilled' && sharingResponse.value?.data) {
+            sharingStats = sharingResponse.value.data;
+          }
+          
+          setDashboardStats({
+            totalPasswords: totalPasswords,
+            strongPasswords: strongCount,
+            weakPasswords: apiData.security?.weakPasswords || Math.max(0, totalPasswords - strongCount),
+            reusedPasswords: apiData.security?.reusedPasswords || 0,
+            securityScore: apiData.security?.score || apiData.overview?.securityScore || 0,
+            breachedAccounts: apiData.security?.breachedAccounts || 0,
+            lastBackup: apiData.backup?.lastBackup ? new Date(apiData.backup.lastBackup).toLocaleDateString() : 'Recently synced',
+            profileCompletion: profileCompletion,
+            passwordsExpiringSoon: apiData.security?.expiredPasswords || 0,
+            lastPasswordChange: apiData.security?.lastPasswordChange ? new Date(apiData.security.lastPasswordChange).toLocaleDateString() : 'Never',
+            securityIncidents: apiData.alerts?.length || 0,
+            masterPasswordStrength: parsedUserData.masterPassword ? 92 : 0,
+            twoFactorEnabled: parsedUserData.twoFactorEnabled || false,
+            credentialsShared: sharingStats.sharedCount || 0
+          });
+        }
       } catch (dashboardError) {
         console.error('Failed to fetch dashboard data:', dashboardError);
+        setError('Failed to load dashboard data');
+      }
+
+      try {
+        // Fetch real recent activities from history API
+        const historyResponse = await historyAPI.getHistory({
+          page: 1,
+          limit: 6,
+          type: 'all'
+        });
+        
+        if (historyResponse.data?.data?.items) {
+          const activities: ActivityItem[] = historyResponse.data.data.items.map((item: any, index: number) => {
+            const iconMap: { [key: string]: any } = {
+              'login': FaUserSecret,
+              'password_change': FaKey,
+              'security_alert': FaExclamationTriangle,
+              'sync': FaSync,
+              'share': FaFileContract,
+              'backup': FaDatabase,
+              'password_created': FaPlus,
+              'document_created': FaDatabase,
+              'document_deleted': FaTimes,
+              'qrcode_scanned': FaQrcode,
+              'backup_restored': FaSync
+            };
+
+            return {
+              id: item._id || `activity-${index}`,
+              type: item.type || 'login',
+              title: item.title || 'Activity',
+              description: item.description || 'Recent activity',
+              timestamp: item.timestamp ? new Date(item.timestamp).toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                hour12: true 
+              }) : item.createdAt || 'Recently',
+              icon: iconMap[item.type] || FaHistory,
+              severity: item.severity || 'low'
+            };
+          });
+          setRecentActivities(activities);
+        }
+      } catch (historyError) {
+        console.error('Failed to fetch activity history:', historyError);
+        // Don't show error for history as it's secondary data
       }
 
       setCurrentFeature('dashboard');
