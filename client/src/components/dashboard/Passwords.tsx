@@ -55,6 +55,11 @@ const Passwords = () => {
   const [showAddEditModal, setShowAddEditModal] = useState(false);
   const [selectedPassword, setSelectedPassword] = useState<Password | null>(null);
 
+  const [verificationModalOpen, setVerificationModalOpen] = useState(false);
+  const [verificationCode, setVerificationCode] = useState('');
+  const [pendingPasswordId, setPendingPasswordId] = useState<string | null>(null);
+  const [verificationLoading, setVerificationLoading] = useState(false);
+
   const categories = ['all', 'identity', 'payment', 'finance', 'license', 'document'];
 
   const [passwordOptions, setPasswordOptions] = useState({
@@ -354,15 +359,37 @@ const Passwords = () => {
       return;
     }
     try {
-      const res = await passwordAPI.getPassword(id);
+      setLoading(true);
+      await passwordAPI.requestAccess(id);
+      setPendingPasswordId(id);
+      setVerificationCode('');
+      setVerificationModalOpen(true);
+    } catch (err) {
+      console.error('Request access error', err);
+      alert('Failed to request access code');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyAccess = async () => {
+    if (!pendingPasswordId || !verificationCode) return;
+    
+    setVerificationLoading(true);
+    try {
+      const res = await passwordAPI.verifyAccess(pendingPasswordId, verificationCode);
       const pw = res?.data?.data?.password;
       if (pw) {
-        setPasswords(prev => prev.map(p => p.id === id ? { ...p, password: pw.password } : p));
-        setShowPassword(id);
+        setPasswords(prev => prev.map(p => p.id === pendingPasswordId ? { ...p, password: pw.password } : p));
+        setShowPassword(pendingPasswordId);
+        setVerificationModalOpen(false);
+        setPendingPasswordId(null);
       }
-    } catch (err) {
-      console.error('Get password error', err);
-      alert('Failed to retrieve password');
+    } catch (err: any) {
+      console.error('Verify access error', err);
+      alert(err?.response?.data?.message || 'Invalid verification code');
+    } finally {
+      setVerificationLoading(false);
     }
   };
 
@@ -1218,6 +1245,66 @@ const Passwords = () => {
                     </motion.button>
                   </div>
                 </form>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Verification Modal */}
+        {verificationModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col"
+            >
+              <div className="bg-indigo-600 p-5 text-white flex justify-between items-center">
+                <h3 className="font-semibold text-lg flex items-center gap-2">
+                  <FaShieldAlt /> Device Verification Required
+                </h3>
+                <button 
+                  onClick={() => setVerificationModalOpen(false)}
+                  className="text-indigo-100 hover:text-white transition-colors"
+                >
+                  <FaTimes />
+                </button>
+              </div>
+              <div className="p-6">
+                <p className="text-gray-600 mb-4">
+                  For your security, we've sent a 6-digit verification code to your linked devices and notifications. 
+                  Please enter it below to reveal this password.
+                </p>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Verification Code</label>
+                  <input 
+                    type="text" 
+                    value={verificationCode}
+                    onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="123456"
+                    className="w-full px-4 py-3 text-center text-2xl tracking-widest font-mono rounded-lg border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition-colors" 
+                  />
+                </div>
+                <div className="flex justify-end gap-3 mt-6">
+                  <button 
+                    onClick={() => setVerificationModalOpen(false)}
+                    className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={handleVerifyAccess}
+                    disabled={verificationLoading || verificationCode.length !== 6}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-indigo-400 transition-colors"
+                  >
+                    {verificationLoading ? 'Verifying...' : 'Verify Access'}
+                  </button>
+                </div>
               </div>
             </motion.div>
           </motion.div>

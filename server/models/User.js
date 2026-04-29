@@ -67,6 +67,14 @@ const userSchema = new Schema({
     type: String,
     default: null
   },
+  accessVerificationCode: {
+    type: String,
+    default: null
+  },
+  accessVerificationExpires: {
+    type: Date,
+    default: null
+  },
   refreshTokens: [{
     token: {
       type: String,

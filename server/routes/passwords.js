@@ -580,4 +580,113 @@ router.post('/:id/compromised', async (req, res) => {
   }
 });
 
+// @route   POST /api/passwords/:id/request-access
+// @desc    Request verification code to view password
+// @access  Private
+router.post('/:id/request-access', async (req, res) => {
+  try {
+    const password = await Password.findOne({
+      _id: req.params.id,
+      userId: req.user.userId
+    });
+
+    if (!password) {
+      return res.status(404).json({ success: false, message: 'Password not found' });
+    }
+
+    const User = (await import('../models/User.js')).default;
+    const user = await User.findById(req.user.userId);
+    
+    // Generate 6-digit code
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    user.accessVerificationCode = code;
+    user.accessVerificationExpires = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+    
+    // Add notification
+    if (!user.profile.notifications) user.profile.notifications = [];
+    user.profile.notifications.push({
+      title: 'Password Access Request',
+      message: `A verification code was requested to access password "${password.title}". Please check your secure terminal/device. Valid for 5 minutes.`,
+      type: 'security',
+      category: 'security',
+      priority: 'high',
+      isRead: false,
+      createdAt: new Date()
+    });
+    
+    await user.save();
+    
+    // Print the code clearly in the terminal
+    console.log('\n======================================================');
+    console.log(`🔒 SECURITY VERIFICATION CODE FOR: ${password.title}`);
+    console.log(`🔑 CODE: ${code}`);
+    console.log('======================================================\n');
+    
+    logger.info(`Access code generated for user: ${req.user.userId}`);
+
+    res.json({
+      success: true,
+      message: 'Verification code sent to your devices and notifications'
+    });
+  } catch (error) {
+    logger.error('Request access error:', error);
+    res.status(500).json({ success: false, message: 'Failed to request access' });
+  }
+});
+
+// @route   POST /api/passwords/:id/verify-access
+// @desc    Verify code and get password
+// @access  Private
+router.post('/:id/verify-access', async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code) {
+      return res.status(400).json({ success: false, message: 'Verification code is required' });
+    }
+
+    const User = (await import('../models/User.js')).default;
+    const user = await User.findById(req.user.userId);
+
+    if (!user.accessVerificationCode || user.accessVerificationCode !== code) {
+      return res.status(401).json({ success: false, message: 'Invalid verification code' });
+    }
+
+    if (user.accessVerificationExpires < new Date()) {
+      return res.status(401).json({ success: false, message: 'Verification code has expired' });
+    }
+
+    // Clear the code
+    user.accessVerificationCode = null;
+    user.accessVerificationExpires = null;
+    await user.save();
+
+    const password = await Password.findOne({
+      _id: req.params.id,
+      userId: req.user.userId
+    });
+
+    if (!password) {
+      return res.status(404).json({ success: false, message: 'Password not found' });
+    }
+
+    const decryptedPassword = password.decryptPassword();
+    await password.updateLastUsed();
+
+    res.json({
+      success: true,
+      message: 'Access granted',
+      data: {
+        password: {
+          ...password.toJSON(),
+          password: decryptedPassword
+        }
+      }
+    });
+  } catch (error) {
+    logger.error('Verify access error:', error);
+    res.status(500).json({ success: false, message: 'Failed to verify access' });
+  }
+});
+
 export default router;

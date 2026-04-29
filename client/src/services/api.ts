@@ -202,6 +202,8 @@ export const passwordAPI = {
   getExpiring: (days: number = 30) => api.get('/passwords/expiring/soon', { params: { days } }),
   toggleFavorite: (id: string) => api.post(`/passwords/${id}/favorite`),
   markCompromised: (id: string) => api.post(`/passwords/${id}/compromised`),
+  requestAccess: (id: string) => api.post(`/passwords/${id}/request-access`),
+  verifyAccess: (id: string, code: string) => api.post(`/passwords/${id}/verify-access`, { code }),
 };
 
 // Sharing API

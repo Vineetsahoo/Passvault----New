@@ -568,17 +568,28 @@ async function performSync(syncLogId, deviceId, dataTypes, userId) {
     syncLog.syncStatus = 'in_progress';
     await syncLog.save();
 
-    // Simulate syncing different data types
+    // Get real counts from database
+    const Password = (await import('../models/Password.js')).default;
+    const SecureDocument = (await import('../models/SecureDocument.js')).default;
+    const QRCode = (await import('../models/QRCode.js')).default;
+
+    const [pwdCount, docCount, qrCount] = await Promise.all([
+      dataTypes.includes('passwords') ? Password.countDocuments({ userId: userId }) : 0,
+      dataTypes.includes('documents') ? SecureDocument.countDocuments({ userId: userId }) : 0,
+      dataTypes.includes('qrcodes') ? QRCode.countDocuments({ userId: userId }) : 0
+    ]);
+
     const itemsSynced = {
-      passwords: dataTypes.includes('passwords') ? Math.floor(Math.random() * 20) : 0,
-      documents: dataTypes.includes('documents') ? Math.floor(Math.random() * 10) : 0,
-      settings: dataTypes.includes('settings') ? (dataTypes.includes('settings') ? 1 : 0) : 0,
-      notes: dataTypes.includes('notes') ? Math.floor(Math.random() * 15) : 0,
-      qrcodes: dataTypes.includes('qrcodes') ? Math.floor(Math.random() * 8) : 0
+      passwords: pwdCount,
+      documents: docCount,
+      settings: dataTypes.includes('settings') ? 1 : 0,
+      notes: 0,
+      qrcodes: qrCount
     };
 
     const totalItems = Object.values(itemsSynced).reduce((sum, count) => sum + count, 0);
-    const dataSynced = totalItems * 1024 * (Math.random() * 10 + 5); // Random size per item
+    // Real data sizes would be calculated by fetching items, but estimating based on count is a safe middle ground
+    const dataSynced = (pwdCount * 1024) + (docCount * 50 * 1024) + (qrCount * 5 * 1024);
 
     // Simulate sync completion
     await new Promise(resolve => setTimeout(resolve, 2000));
