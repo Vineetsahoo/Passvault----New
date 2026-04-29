@@ -1075,7 +1075,9 @@ const Passwords = () => {
                       type="text" 
                       defaultValue={selectedPassword?.title}
                       name="title"
-                      className="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-300 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50 py-3" 
+                      className="w-full px-3 py-3 rounded-lg border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50 transition-colors" 
+                      placeholder="Enter credential title"
+                      required
                     />
                   </div>
                   
@@ -1083,9 +1085,9 @@ const Passwords = () => {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
                       <select 
-                        defaultValue={selectedPassword?.category}
+                        defaultValue={selectedPassword?.category || 'finance'}
                         name="category"
-                        className="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-300 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50"
+                        className="w-full px-3 py-3 rounded-lg border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50 transition-colors"
                       >
                         <option value="finance">Finance</option>
                         <option value="identity">Identity</option>
@@ -1097,9 +1099,9 @@ const Passwords = () => {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Credential Type</label>
                       <select 
-                        defaultValue={selectedPassword?.passType}
+                        defaultValue={selectedPassword?.passType || 'account'}
                         name="passType"
-                        className="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-300 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50"
+                        className="w-full px-3 py-3 rounded-lg border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50 transition-colors"
                       >
                         <option value="account">Account</option>
                         <option value="payment">Payment</option>
@@ -1116,7 +1118,8 @@ const Passwords = () => {
                       type="text" 
                       defaultValue={selectedPassword?.issuer}
                       name="website"
-                      className="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-300 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50 py-3" 
+                      className="w-full px-3 py-3 rounded-lg border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50 transition-colors" 
+                      placeholder="e.g., Bank Name, Service Provider"
                     />
                   </div>
                   
@@ -1126,7 +1129,9 @@ const Passwords = () => {
                       type="text" 
                       defaultValue={selectedPassword?.username}
                       name="username"
-                      className="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-300 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50 py-3" 
+                      className="w-full px-3 py-3 rounded-lg border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50 transition-colors" 
+                      placeholder="Enter your username or ID"
+                      required
                     />
                   </div>
                   
@@ -1137,7 +1142,9 @@ const Passwords = () => {
                         type="password" 
                         defaultValue={selectedPassword?.password}
                         name="password"
-                        className="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-300 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50 py-3 pr-10" 
+                        className="w-full px-3 py-3 rounded-lg border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50 transition-colors pr-20" 
+                        placeholder="Enter a secure password"
+                        required
                       />
                       <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center">
                         <button type="button" className="p-1 text-gray-400 hover:text-gray-600">
@@ -1175,7 +1182,7 @@ const Passwords = () => {
                       type="date" 
                       defaultValue={selectedPassword?.expiryDate ? selectedPassword.expiryDate.split('T')[0] : ''}
                       name="expiryDate"
-                      className="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-300 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50" 
+                      className="w-full px-3 py-3 rounded-lg border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50 transition-colors" 
                     />
                   </div>
                   
@@ -1184,8 +1191,9 @@ const Passwords = () => {
                     <textarea 
                       defaultValue={selectedPassword?.notes}
                       name="notes"
-                      className="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-300 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50" 
+                      className="w-full px-3 py-3 rounded-lg border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50 transition-colors resize-none" 
                       rows={3}
+                      placeholder="Add any additional notes or details"
                     ></textarea>
                   </div>
                   

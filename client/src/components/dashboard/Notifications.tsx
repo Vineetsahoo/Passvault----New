@@ -10,6 +10,7 @@ import { HiBell, HiBellAlert } from 'react-icons/hi2';
 import { IoCheckmarkDoneCircle } from "react-icons/io5";
 import axios from 'axios';
 import alertService, { Alert } from '../../services/alertService';
+import { notificationAPI } from '../../services/api';
 
 interface Notification {
   _id: string;
@@ -107,10 +108,9 @@ const Notifications = () => {
   const fetchNotifications = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('accessToken');
       const isAuthenticated = localStorage.getItem('isAuthenticated') === 'true';
       
-      if (!token || !isAuthenticated) {
+      if (!isAuthenticated) {
         setError('Authentication required');
         setNotifications([]);
         return;
@@ -118,12 +118,10 @@ const Notifications = () => {
 
       // Fetch both notifications and alerts in parallel
       const [notificationsResponse, alertsResponse] = await Promise.all([
-        axios.get(`${API_URL}/user/notifications`, {
-          headers: { Authorization: `Bearer ${token}` },
-          params: {
-            category: filter === 'all' || filter === 'alerts' ? undefined : filter,
-            sortBy: sortBy === 'priority' ? 'priority' : 'date'
-          }
+        notificationAPI.getNotifications({
+          filter: filter === 'all' ? undefined : filter,
+          sortBy: sortBy === 'priority' ? 'priority' : 'date',
+          limit: 100
         }).catch(err => {
           console.error('Error fetching notifications:', err);
           return { data: { success: false, data: { notifications: [] } } };
@@ -208,12 +206,7 @@ const Notifications = () => {
         );
       } else {
         // Regular notification - use notification API
-        const token = localStorage.getItem('accessToken');
-        await axios.put(
-          `${API_URL}/user/notifications/${id}/read`,
-          {},
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
+        await notificationAPI.markAsRead(id);
         
         // Update local state
         setNotifications(prev => 
@@ -234,10 +227,7 @@ const Notifications = () => {
         await alertService.deleteAlert(id);
       } else {
         // Regular notification - use notification API
-        const token = localStorage.getItem('accessToken');
-        await axios.delete(`${API_URL}/user/notifications/${id}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+        await notificationAPI.deleteNotification(id);
       }
       
       // Update local state
@@ -324,19 +314,13 @@ const Notifications = () => {
 
   const markAllAsRead = async () => {
     try {
-      const token = localStorage.getItem('accessToken');
-      
       // Separate alerts from regular notifications
       const regularNotifications = notifications.filter(n => !n.isAlertType && !n.isRead);
       const alertNotifications = notifications.filter(n => n.isAlertType && !n.isRead);
       
       // Mark all regular notifications as read (if any exist)
       if (regularNotifications.length > 0) {
-        await axios.put(
-          `${API_URL}/user/notifications/mark-all-read`,
-          {},
-          { headers: { Authorization: `Bearer ${token}` } }
-        ).catch(err => {
+        await notificationAPI.markAllAsRead().catch(err => {
           console.error('Error marking regular notifications as read:', err);
           throw err; // Re-throw to prevent local state update on failure
         });
@@ -347,7 +331,7 @@ const Notifications = () => {
         await axios.put(
           `${API_URL}/alerts/mark-all-read`,
           {},
-          { headers: { Authorization: `Bearer ${token}` } }
+          { headers: { Authorization: `Bearer ${localStorage.getItem('accessToken')}` } }
         ).catch(err => {
           console.error('Error marking alerts as read:', err);
           throw err; // Re-throw to prevent local state update on failure
@@ -582,9 +566,11 @@ const Notifications = () => {
         </motion.div>
       ) : (
         <AnimatePresence mode="popLayout">
-          <motion.div 
+          <motion.div
+            key="notifications-list"
             initial="hidden"
             animate="visible"
+            exit="hidden"
             variants={{
               hidden: { opacity: 0 },
               visible: { 
@@ -707,7 +693,7 @@ const Notifications = () => {
           ))}
           
           {filteredNotifications.length > 0 && filteredNotifications.length < notifications.length && (
-            <div className="flex justify-center pt-4">
+            <div key="view-all-button" className="flex justify-center pt-4">
               <button 
                 onClick={() => setFilter('all')}
                 className="px-5 py-2.5 bg-white border border-gray-200 rounded-lg shadow-sm hover:bg-gray-50 text-gray-700 font-medium flex items-center gap-2"

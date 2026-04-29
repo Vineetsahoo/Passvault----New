@@ -1995,26 +1995,19 @@ const Dashboard = () => {
 
       try {
         // Fetch real recent activities from history API
-        const historyResponse = await historyAPI.getHistory({
-          page: 1,
-          limit: 6,
-          type: 'all'
-        });
+        const historyResponse = await historyAPI.getRecent(6);
         
         if (historyResponse.data?.data?.items) {
           const activities: ActivityItem[] = historyResponse.data.data.items.map((item: any, index: number) => {
             const iconMap: { [key: string]: any } = {
               'login': FaUserSecret,
-              'password_change': FaKey,
+              'password': FaKey,
               'security_alert': FaExclamationTriangle,
               'sync': FaSync,
               'share': FaFileContract,
               'backup': FaDatabase,
-              'password_created': FaPlus,
-              'document_created': FaDatabase,
-              'document_deleted': FaTimes,
-              'qrcode_scanned': FaQrcode,
-              'backup_restored': FaSync
+              'document': FaDatabase,
+              'qrcode': FaQrcode
             };
 
             return {
@@ -2026,7 +2019,7 @@ const Dashboard = () => {
                 hour: '2-digit', 
                 minute: '2-digit',
                 hour12: true 
-              }) : item.createdAt || 'Recently',
+              }) : 'Recently',
               icon: iconMap[item.type] || FaHistory,
               severity: item.severity || 'low'
             };

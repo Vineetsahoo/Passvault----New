@@ -280,12 +280,15 @@ router.put('/profile', validateProfileUpdate, async (req, res) => {
         updatedUser.profile.notifications = [];
       }
       
-      updatedUser.profile.notifications.push({
+      const notification = {
+        _id: new mongoose.Types.ObjectId(),
         title: 'Profile Updated',
         message: `Your profile information has been updated successfully. ${updatedFieldsList.length} field(s) changed.`,
         type: 'success',
         category: 'profile',
         priority: 'low',
+        createdAt: new Date(),
+        isRead: false,
         action: {
           type: 'internal',
           label: 'View Profile',
@@ -295,7 +298,9 @@ router.put('/profile', validateProfileUpdate, async (req, res) => {
           resourceType: 'profile',
           newValue: `Updated fields: ${updatedFieldsList.join(', ')}`
         }
-      });
+      };
+
+      updatedUser.profile.notifications.push(notification);
 
       console.log('📬 Notification created for profile update');
       await updatedUser.save();
@@ -1308,6 +1313,21 @@ router.get('/notifications', async (req, res) => {
 
     let notifications = user.profile.notifications || [];
 
+    // Ensure all notifications have unique IDs - add them if missing
+    notifications = notifications.map((n, index) => ({
+      _id: n._id || new mongoose.Types.ObjectId(),
+      title: n.title,
+      message: n.message,
+      type: n.type || 'info',
+      category: n.category || 'system',
+      priority: n.priority || 'medium',
+      isRead: n.isRead || false,
+      action: n.action || null,
+      createdAt: n.createdAt || new Date(),
+      readAt: n.readAt || null,
+      metadata: n.metadata || {}
+    }));
+
     // Filter by category
     if (filter && filter !== 'all') {
       notifications = notifications.filter(n => n.category === filter);
@@ -1319,7 +1339,7 @@ router.get('/notifications', async (req, res) => {
       notifications.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
     } else {
       // Sort by newest (default)
-      notifications.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      notifications.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     }
 
     // Limit results
@@ -1330,7 +1350,7 @@ router.get('/notifications', async (req, res) => {
       message: 'Notifications retrieved successfully',
       data: {
         notifications: notifications.map(n => ({
-          id: n._id,
+          _id: n._id.toString() || n._id,
           title: n.title,
           message: n.message,
           type: n.type,
@@ -1338,7 +1358,7 @@ router.get('/notifications', async (req, res) => {
           priority: n.priority,
           isRead: n.isRead,
           action: n.action,
-          timestamp: n.createdAt,
+          createdAt: n.createdAt,
           readAt: n.readAt
         })),
         unreadCount: notifications.filter(n => !n.isRead).length,

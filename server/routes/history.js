@@ -426,6 +426,111 @@ router.get('/stats', async (req, res) => {
 });
 
 /**
+ * @route   GET /api/history/recent
+ * @desc    Get recent activities for dashboard
+ * @access  Private
+ */
+router.get('/recent', async (req, res) => {
+  try {
+    const { limit = 6 } = req.query;
+    const userId = new mongoose.Types.ObjectId(req.user.userId);
+
+    const historyItems = [];
+
+    // Fetch recent passwords
+    const passwords = await Password.find({ userId })
+      .select('title website createdAt updatedAt')
+      .sort({ updatedAt: -1 })
+      .limit(10)
+      .lean();
+
+    passwords.forEach(password => {
+      historyItems.push({
+        _id: password._id,
+        type: 'password',
+        title: password.title || 'Password',
+        description: `Password updated: ${password.website || password.title}`,
+        timestamp: password.updatedAt || password.createdAt,
+        severity: 'low'
+      });
+    });
+
+    // Fetch recent documents
+    const documents = await SecureDocument.find({ userId })
+      .select('originalName category createdAt')
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
+
+    documents.forEach(document => {
+      historyItems.push({
+        _id: document._id,
+        type: 'document',
+        title: 'Document Upload',
+        description: `Document "${document.originalName}" uploaded`,
+        timestamp: document.createdAt,
+        severity: 'low'
+      });
+    });
+
+    // Fetch recent backups
+    const backups = await Backup.find({ userId })
+      .select('type status createdAt')
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
+
+    backups.forEach(backup => {
+      historyItems.push({
+        _id: backup._id,
+        type: 'backup',
+        title: `${backup.type} Backup`,
+        description: `${backup.type} backup ${backup.status}`,
+        timestamp: backup.createdAt,
+        severity: backup.status === 'failed' ? 'high' : 'low'
+      });
+    });
+
+    // Fetch login attempts
+    const user = await User.findById(userId).select('profile.security.loginHistory');
+    if (user?.profile?.security?.loginHistory) {
+      user.profile.security.loginHistory.slice(0, 5).forEach(login => {
+        historyItems.push({
+          _id: login._id,
+          type: 'login',
+          title: 'Login',
+          description: `${login.status === 'success' ? 'Successful' : 'Failed'} login from ${login.device || 'Unknown device'}`,
+          timestamp: login.timestamp,
+          severity: login.status === 'failed' ? 'medium' : 'low'
+        });
+      });
+    }
+
+    // Sort by timestamp and limit
+    const recentItems = historyItems
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, parseInt(limit));
+
+    res.json({
+      success: true,
+      message: 'Recent activities retrieved successfully',
+      data: {
+        items: recentItems,
+        total: recentItems.length
+      }
+    });
+
+  } catch (error) {
+    logger.error('Get recent activity error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve recent activities',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
  * @route   DELETE /api/history
  * @desc    Clear activity history (soft delete - archives data)
  * @access  Private

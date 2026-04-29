@@ -107,6 +107,9 @@ export const historyAPI = {
     sortBy?: string;
   }) => api.get('/history', { params }),
 
+  getRecent: (limit: number = 6) => 
+    api.get('/history/recent', { params: { limit } }),
+
   getTimeline: (days: number = 30) => 
     api.get('/history/timeline', { params: { days } }),
 
@@ -405,6 +408,27 @@ export const documentAPI = {
 
   searchDocuments: (query: string) =>
     api.get('/documents/search', { params: { query } }),
+};
+
+// Notifications API
+export const notificationAPI = {
+  getNotifications: (params?: {
+    filter?: string;
+    sortBy?: 'priority' | 'date';
+    limit?: number;
+  }) => api.get('/user/notifications', { params }),
+
+  markAsRead: (id: string) => 
+    api.put(`/user/notifications/${id}/read`, {}),
+
+  deleteNotification: (id: string) => 
+    api.delete(`/user/notifications/${id}`),
+
+  markAllAsRead: () => 
+    api.put('/user/notifications/mark-all-read', {}),
+
+  clearAllNotifications: () => 
+    api.delete('/user/notifications'),
 };
 
 // Utility functions
