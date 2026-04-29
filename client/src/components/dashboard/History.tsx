@@ -84,8 +84,8 @@ const History: React.FC = () => {
       });
 
       if (response.data.success) {
-        const formattedEvents = response.data.data.history.map((item: any) => ({
-          id: item._id,
+        const formattedEvents = response.data.data.history.map((item: any, index: number) => ({
+          id: item._id || item.id || `event-${index}-${Date.now()}`,
           date: item.timestamp || item.createdAt,
           eventType: item.type,
           description: item.description || `${item.action} ${item.type}`,

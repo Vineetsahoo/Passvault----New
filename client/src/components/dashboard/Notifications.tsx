@@ -199,8 +199,9 @@ const Notifications = () => {
       
       if (notification?.isAlertType) {
         // This is an alert - use alert service
-        // Note: Alert service doesn't have a mark as read endpoint yet
-        // For now, just update local state
+        await alertService.markAsRead(id);
+        
+        // Update local state
         setNotifications(prev => 
           prev.map(n => n._id === id ? { ...n, isRead: true, readAt: new Date().toISOString() } : n)
         );

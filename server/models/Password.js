@@ -152,10 +152,20 @@ passwordSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'your-32-character-encryption-key';
 const ALGORITHM = 'aes-256-gcm';
 
+const getEncryptionKey = () => {
+  // Ensure the key is exactly 32 bytes (256 bits)
+  if (Buffer.from(ENCRYPTION_KEY).length === 32) {
+    return Buffer.from(ENCRYPTION_KEY);
+  }
+  // If not 32 bytes, hash it to get 32 bytes
+  return crypto.createHash('sha256').update(String(ENCRYPTION_KEY)).digest();
+};
+
 passwordSchema.methods.encryptPassword = function(plainPassword) {
   try {
     const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipher(ALGORITHM, ENCRYPTION_KEY);
+    const key = getEncryptionKey();
+    const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
     cipher.setAAD(Buffer.from(this.userId.toString()));
     
     let encrypted = cipher.update(plainPassword, 'utf8', 'hex');
@@ -167,6 +177,7 @@ passwordSchema.methods.encryptPassword = function(plainPassword) {
     this.encryptedPassword = iv.toString('hex') + ':' + authTag.toString('hex') + ':' + encrypted;
     return this.encryptedPassword;
   } catch (error) {
+    console.error('Encryption error:', error);
     throw new Error('Failed to encrypt password');
   }
 };
@@ -186,7 +197,8 @@ passwordSchema.methods.decryptPassword = function() {
     const authTag = Buffer.from(parts[1], 'hex');
     const encrypted = parts[2];
     
-    const decipher = crypto.createDecipher(ALGORITHM, ENCRYPTION_KEY);
+    const key = getEncryptionKey();
+    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
     decipher.setAAD(Buffer.from(this.userId.toString()));
     decipher.setAuthTag(authTag);
     
@@ -195,6 +207,7 @@ passwordSchema.methods.decryptPassword = function() {
     
     return decrypted;
   } catch (error) {
+    console.error('Decryption error:', error);
     throw new Error('Failed to decrypt password');
   }
 };

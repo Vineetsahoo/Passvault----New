@@ -13,6 +13,7 @@ import {
 } from 'react-icons/fa';
 import { FaShieldVirus, FaBinoculars, FaSignal } from 'react-icons/fa6';
 import { monitoringAPI } from '../../services/api';
+import alertService, { Alert } from '../../services/alertService';
 
 // New interfaces for real-time data visualization
 interface RealTimeMetric {
@@ -130,7 +131,7 @@ const Monitoring: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const [dashboardRes, securityRes, performanceRes, alertsRes] = await Promise.all([
+      const [dashboardRes, securityRes, performanceRes, alertsRes, dbAlertsRes] = await Promise.all([
         monitoringAPI.getDashboard(
           selectedTimeframe === '24h' ? 'today' : 
           selectedTimeframe === '7d' ? 'week' : 
@@ -139,9 +140,11 @@ const Monitoring: React.FC = () => {
         ),
         monitoringAPI.getSecurity(),
         monitoringAPI.getPerformance(),
-        monitoringAPI.getAlerts({ limit: 20 })
+        monitoringAPI.getAlerts({ limit: 20 }),
+        alertService.getAlerts({ limit: 50, isResolved: false }).catch(() => ({ alerts: [], pagination: { current: 1, pages: 0, total: 0 } }))
       ]);
 
+      let allAlerts: any[] = [];
       if (dashboardRes.data.success) {
         setDashboardData(dashboardRes.data.data);
       }
@@ -166,8 +169,26 @@ const Monitoring: React.FC = () => {
           risk_score: alert.severity === 'critical' ? 90 : alert.severity === 'high' ? 70 : alert.severity === 'medium' ? 50 : 30,
           recommendations: [alert.action || 'Review and take appropriate action']
         }));
-        setAlertsData(formattedAlerts);
+        allAlerts = [...allAlerts, ...formattedAlerts];
       }
+      
+      if (dbAlertsRes && dbAlertsRes.alerts) {
+        const dbFormattedAlerts = dbAlertsRes.alerts.map((alert: Alert) => ({
+          id: alert._id,
+          severity: alert.severity,
+          type: alert.alertType,
+          title: alert.title,
+          description: alert.message,
+          affectedAccounts: alert.relatedTo ? [alert.relatedTo] : [],
+          source: 'System Event',
+          detectedAt: new Date(alert.createdAt).toLocaleString(),
+          status: alert.isResolved ? 'resolved' : 'active',
+          risk_score: alert.severity === 'critical' ? 95 : alert.severity === 'high' ? 75 : alert.severity === 'medium' ? 55 : 35,
+          recommendations: alert.actionLabel ? [alert.actionLabel] : ['Review and take appropriate action']
+        }));
+        allAlerts = [...allAlerts, ...dbFormattedAlerts];
+      }
+      setAlertsData(allAlerts);
     } catch (err: any) {
       console.error('Failed to fetch monitoring data:', err);
       setError(err.response?.data?.message || 'Failed to load monitoring data');
@@ -233,38 +254,13 @@ const Monitoring: React.FC = () => {
   });
 
   const breachAlerts = useMemo(() => {
-    // Combine static alerts with API alerts
-    const staticAlerts: BreachAlert[] = [
-      {
-        id: 'br-001',
-        severity: 'critical',
-        type: 'data-breach',
-        title: 'Major Social Media Platform Breach',
-        description: 'Your email address was found in a recent data breach affecting 50M+ users from a popular social media platform. Immediate action required.',
-        affectedAccounts: ['user@example.com'],
-        source: 'HaveIBeenPwned API',
-        detectedAt: '5 minutes ago',
-        status: 'active',
-        risk_score: 95,
-        location: 'Russia',
-        recommendations: [
-          'Change password immediately for all associated accounts',
-          'Enable two-factor authentication if not already active',
-          'Monitor account for suspicious activity for the next 30 days',
-          'Consider freezing credit reports as a precaution'
-        ]
-      }
-    ];
-
-    // Add API alerts if available
-    if (alertsData.length > 0) {
-      return [...alertsData, ...staticAlerts];
-    }
-    
-    return staticAlerts;
+    return alertsData;
   }, [alertsData]);
 
-  const categories = ['all', 'data-breach', 'dark-web', 'suspicious-login', 'phishing', 'malware'];
+  const categories = useMemo(() => {
+    const types = Array.from(new Set(alertsData.map((a: any) => a.type)));
+    return ['all', ...types];
+  }, [alertsData]);
 
   // Full scan handler
   const handleFullScan = () => {
@@ -835,14 +831,14 @@ const Monitoring: React.FC = () => {
                     : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-200 shadow-sm'
                 }`}
               >
-                {{
+                {({
                   'all': <FaShieldAlt className={selectedCategory === category ? 'text-red-200' : 'text-red-600'} />,
                   'data-breach': <FaDatabase className={selectedCategory === category ? 'text-red-200' : 'text-blue-600'} />,
                   'dark-web': <FaSkull className={selectedCategory === category ? 'text-red-200' : 'text-gray-800'} />,
                   'suspicious-login': <FaUserSecret className={selectedCategory === category ? 'text-red-200' : 'text-purple-600'} />,
                   'phishing': <FaBug className={selectedCategory === category ? 'text-red-200' : 'text-orange-600'} />,
                   'malware': <FaRadiation className={selectedCategory === category ? 'text-red-200' : 'text-red-600'} />
-                }[category] || <FaShieldAlt className={selectedCategory === category ? 'text-red-200' : 'text-red-600'} />}
+                } as Record<string, JSX.Element>)[category] || <FaShieldAlt className={selectedCategory === category ? 'text-red-200' : 'text-red-600'} />}
                 <span className="font-medium">
                   {category === 'all' ? 'All Threats' : category.replace('-', ' ')}
                 </span>
