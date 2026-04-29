@@ -1,4 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { passwordAPI } from '../../services/api';
+import alertService from '../../services/alertService';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   FaKey, FaEye, FaEyeSlash, FaCopy, FaEdit, FaTrash, FaPlus, 
@@ -9,7 +11,7 @@ import {
 } from 'react-icons/fa';
 
 interface Password {
-  id: number;
+  id: string;
   title: string;
   username: string;
   password: string;
@@ -17,75 +19,18 @@ interface Password {
   category: string;
   strength: 'weak' | 'medium' | 'strong';
   notes?: string;
+  isFavorite?: boolean;
   passType: 'account' | 'payment' | 'identity' | 'license' | 'document';
   expiryDate?: string;
   issuer?: string;
 }
 
 const Passwords = () => {
-  const [passwords, setPasswords] = useState([
-    { 
-      id: 1, 
-      title: 'Online Banking Pass',
-      username: 'john.doe',
-      password: '********',
-      lastUpdated: '2 days ago',
-      category: 'finance',
-      strength: 'strong',
-      passType: 'account',
-      issuer: 'Chase Bank',
-      notes: 'Main banking account credentials'
-    },
-    { 
-      id: 2, 
-      title: 'Passport Credentials',
-      username: 'PASS123456',
-      password: '********',
-      lastUpdated: '1 month ago',
-      category: 'identity',
-      strength: 'strong',
-      passType: 'document',
-      expiryDate: '2028-12-31',
-      issuer: 'Department of State'
-    },
-    { 
-      id: 3, 
-      title: 'Driver License',
-      username: 'DL98765432',
-      password: '********',
-      lastUpdated: '3 months ago',
-      category: 'identity',
-      strength: 'medium',
-      passType: 'license',
-      expiryDate: '2025-06-30',
-      issuer: 'DMV'
-    },
-    { 
-      id: 4, 
-      title: 'Credit Card PIN',
-      username: '**** **** **** 1234',
-      password: '****',
-      lastUpdated: '1 week ago',
-      category: 'payment',
-      strength: 'strong',
-      passType: 'payment',
-      expiryDate: '2026-05',
-      issuer: 'Visa'
-    },
-    {
-      id: 5,
-      title: 'SSN Information',
-      username: '***-**-1234',
-      password: '********',
-      lastUpdated: '6 months ago',
-      category: 'identity',
-      strength: 'strong',
-      passType: 'document',
-      issuer: 'Social Security Administration'
-    }
-  ]);
+  const [passwords, setPasswords] = useState<Password[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const [showPassword, setShowPassword] = useState<number | null>(null);
+  const [showPassword, setShowPassword] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'title' | 'lastUpdated'>('title');
@@ -302,6 +247,106 @@ const Passwords = () => {
       case 'license': return <FaAddressCard className="text-purple-600" />;
       case 'document': return <FaFileAlt className="text-orange-600" />;
       default: return <FaKey className="text-indigo-600" />;
+    }
+  };
+
+  // Fetch passwords from backend
+  const fetchPasswords = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await passwordAPI.getPasswords({ limit: 100 });
+      // API returns { success, message, data: { passwords, pagination } }
+      const items = res?.data?.data?.passwords || [];
+      const mapped = items.map((p: any) => ({
+        id: p._id,
+        title: p.title,
+        username: p.username || '',
+        password: '••••••••',
+        lastUpdated: p.updatedAt || p.createdAt,
+        category: p.category || 'other',
+        strength: p.strength || 'medium',
+        notes: p.notes || '',
+        passType: p.passType || 'account',
+        expiryDate: p.expiresAt || p.expiryDate || undefined,
+        issuer: p.issuer || ''
+      }));
+      setPasswords(mapped);
+    } catch (err: any) {
+      setError(err?.response?.data?.message || err.message || 'Failed to load passwords');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPasswords();
+  }, []);
+
+  const handleDelete = async (id: string) => {
+    try {
+      await passwordAPI.deletePassword(id);
+      setPasswords(prev => prev.filter(p => p.id !== id));
+      // create a low-severity alert so Notifications and dashboard can pick it up
+      await alertService.createAlert({
+        alertType: 'security_scan',
+        severity: 'low',
+        title: 'Credential removed',
+        message: 'A credential was removed from your vault',
+        relatedTo: 'password',
+        relatedId: id,
+      });
+    } catch (err) {
+      console.error('Delete error', err);
+      alert('Failed to delete item');
+    }
+  };
+
+  const handleToggleFavorite = async (id: string) => {
+    try {
+      const res = await passwordAPI.toggleFavorite(id);
+      const isFavorite = res?.data?.data?.isFavorite;
+      setPasswords(prev => prev.map(p => p.id === id ? { ...p, isFavorite } : p));
+    } catch (err) {
+      console.error('Toggle favorite error', err);
+    }
+  };
+
+  const handleMarkCompromised = async (id: string) => {
+    try {
+      await passwordAPI.markCompromised(id);
+      // Update local state
+      setPasswords(prev => prev.map(p => p.id === id ? { ...p, strength: 'weak' } : p));
+      await alertService.createAlert({
+        alertType: 'breach',
+        severity: 'high',
+        title: 'Compromised credential detected',
+        message: 'A credential was marked as compromised',
+        relatedTo: 'password',
+        relatedId: id,
+        actionRequired: true,
+        actionLabel: 'Review'
+      });
+    } catch (err) {
+      console.error('Mark compromised error', err);
+    }
+  };
+
+  const handleShowPassword = async (id: string) => {
+    if (showPassword === id) {
+      setShowPassword(null);
+      return;
+    }
+    try {
+      const res = await passwordAPI.getPassword(id);
+      const pw = res?.data?.data?.password;
+      if (pw) {
+        setPasswords(prev => prev.map(p => p.id === id ? { ...p, password: pw.password } : p));
+        setShowPassword(id);
+      }
+    } catch (err) {
+      console.error('Get password error', err);
+      alert('Failed to retrieve password');
     }
   };
 
@@ -792,13 +837,13 @@ const Passwords = () => {
                     >
                       <FaEdit />
                     </motion.button>
-                    <motion.button
+                      <motion.button
                       whileHover={{ scale: 1.1 }}
                       whileTap={{ scale: 0.9 }}
                       className="p-2 hover:bg-red-50 rounded-lg text-gray-500 hover:text-red-600 transition-colors"
                       onClick={() => {
                         if (confirm("Are you sure you want to delete this item?")) {
-                          setPasswords(passwords.filter(p => p.id !== password.id));
+                          handleDelete(password.id as string);
                         }
                       }}
                     >
@@ -839,7 +884,7 @@ const Passwords = () => {
                         <motion.button 
                           whileHover={{ scale: 1.1 }}
                           whileTap={{ scale: 0.9 }}
-                          onClick={() => setShowPassword(showPassword === password.id ? null : password.id)}
+                          onClick={() => handleShowPassword(password.id as string)}
                           className="p-2 hover:bg-gray-200 rounded-lg text-gray-600"
                         >
                           {showPassword === password.id ? <FaEyeSlash /> : <FaEye />}
