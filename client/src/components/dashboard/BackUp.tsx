@@ -73,6 +73,23 @@ const Switch: React.FC<SwitchProps> = ({ checked, onChange, label }) => {
   );
 };
 
+// Validation Error Component
+const ValidationError: React.FC<{ message?: string }> = ({ message }) => {
+  if (!message) return null;
+  return (
+    <motion.p
+      initial={{ opacity: 0, y: -5 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="text-red-600 text-sm mt-1 flex items-center gap-1"
+    >
+      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+      </svg>
+      {message}
+    </motion.p>
+  );
+};
+
 interface BackupVersion {
   id: string;
   timestamp: string;
@@ -133,6 +150,8 @@ const BackUp: React.FC = () => {
     location: 'cloud'
   });
 
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+
   // New feature states
   const [healthScore, setHealthScore] = useState<any>(null);
   const [showSelectiveBackup, setShowSelectiveBackup] = useState(false);
@@ -147,6 +166,93 @@ const BackUp: React.FC = () => {
   const [selectablePasswords, setSelectablePasswords] = useState<any[]>([]);
   const [selectableDocuments, setSelectableDocuments] = useState<any[]>([]);
   const [selectableQRCodes, setSelectableQRCodes] = useState<any[]>([]);
+
+  // ==================== VALIDATION FUNCTIONS ====================
+  
+  const validateRetentionPeriod = (days: number): string | null => {
+    if (!days || isNaN(days)) {
+      return 'Retention period is required';
+    }
+    if (days < 1) {
+      return 'Retention period must be at least 1 day';
+    }
+    if (days > 365) {
+      return 'Retention period cannot exceed 365 days';
+    }
+    return null;
+  };
+
+  const validateBackupFrequency = (frequency: string): string | null => {
+    const validFrequencies = ['daily', 'weekly', 'monthly'];
+    if (!frequency) {
+      return 'Backup frequency is required';
+    }
+    if (!validFrequencies.includes(frequency)) {
+      return 'Invalid backup frequency';
+    }
+    return null;
+  };
+
+  const validateBackupLocation = (location: string): string | null => {
+    const validLocations = ['cloud', 'local'];
+    if (!location) {
+      return 'Backup location is required';
+    }
+    if (!validLocations.includes(location)) {
+      return 'Invalid backup location';
+    }
+    return null;
+  };
+
+  const validateBackupSettings = (): boolean => {
+    const errors: Record<string, string> = {};
+
+    const retentionError = validateRetentionPeriod(backupSettings.retention);
+    if (retentionError) errors.retention = retentionError;
+
+    const frequencyError = validateBackupFrequency(backupSettings.frequency);
+    if (frequencyError) errors.frequency = frequencyError;
+
+    const locationError = validateBackupLocation(backupSettings.location);
+    if (locationError) errors.location = locationError;
+
+    setValidationErrors(errors);
+
+    if (Object.keys(errors).length > 0) {
+      console.log('❌ Backup settings validation failed:', errors);
+      return false;
+    }
+
+    console.log('✅ Backup settings validation passed');
+    return true;
+  };
+
+  const validateSelectiveBackup = (): string | null => {
+    const totalSelected = 
+      selectedItems.passwordIds.length + 
+      selectedItems.documentIds.length + 
+      selectedItems.qrcodeIds.length;
+
+    if (totalSelected === 0) {
+      return 'Please select at least one item to backup';
+    }
+
+    if (totalSelected > 1000) {
+      return 'Cannot backup more than 1000 items at once';
+    }
+
+    return null;
+  };
+
+  const clearValidationError = (field: string) => {
+    setValidationErrors(prev => {
+      const newErrors = { ...prev };
+      delete newErrors[field];
+      return newErrors;
+    });
+  };
+
+  // ==================== END VALIDATION FUNCTIONS ====================
 
   // Fetch all data on component mount
   useEffect(() => {
@@ -530,6 +636,14 @@ const BackUp: React.FC = () => {
 
   const handleUpdateSettings = async () => {
     try {
+      console.log('🔍 Validating backup settings...');
+      
+      // Validate settings before saving
+      if (!validateBackupSettings()) {
+        alert('⚠️ Please fix the validation errors before saving settings');
+        return;
+      }
+
       setIsLoading(true);
       setError(null);
       
@@ -540,17 +654,33 @@ const BackUp: React.FC = () => {
         autoBackupEnabled: syncMode === 'auto'
       };
       
+      console.log('📤 Sending settings update to backend:', updatedSettings);
+      
       const response = await backupService.updateBackupSettings(updatedSettings);
       
       if (response.success) {
+        console.log('✅ Settings updated successfully');
         setBackupSettings(response.settings);
         setShowSettings(false);
+        setValidationErrors({}); // Clear any validation errors
+        alert('✅ Backup settings updated successfully!');
       }
       
       setIsLoading(false);
     } catch (err: any) {
-      console.error('Update settings error:', err);
-      setError(err.response?.data?.message || 'Failed to update settings');
+      console.error('❌ Update settings error:', err);
+      const errorMessage = err.response?.data?.message || 'Failed to update settings';
+      setError(errorMessage);
+      
+      // Handle backend validation errors
+      if (err.response?.data?.errors && Array.isArray(err.response.data.errors)) {
+        const backendErrors: Record<string, string> = {};
+        err.response.data.errors.forEach((error: any) => {
+          backendErrors[error.field] = error.message;
+        });
+        setValidationErrors(backendErrors);
+      }
+      
       setIsLoading(false);
     }
   };
@@ -558,24 +688,38 @@ const BackUp: React.FC = () => {
   // New feature handlers
   const handleSelectiveBackup = async () => {
     try {
-      if (selectedItems.passwordIds.length === 0 && 
-          selectedItems.documentIds.length === 0 && 
-          selectedItems.qrcodeIds.length === 0) {
-        setError('Please select at least one item to backup');
+      console.log('🔍 Validating selective backup...');
+      
+      // Validate selective backup
+      const validationError = validateSelectiveBackup();
+      if (validationError) {
+        setError(validationError);
+        alert(`⚠️ ${validationError}`);
         return;
       }
+
+      console.log('✅ Selective backup validation passed');
+      console.log('📊 Selected items:', {
+        passwords: selectedItems.passwordIds.length,
+        documents: selectedItems.documentIds.length,
+        qrcodes: selectedItems.qrcodeIds.length
+      });
 
       setShowSelectiveBackup(false);
       setShowBackupModal(true);
       setIsLoading(true);
       setSyncProgress({ total: 100, current: 0, uploading: true });
+      setError(null); // Clear any previous errors
 
+      console.log('📤 Creating selective backup...');
       const response = await backupService.createSelectiveBackup(
         selectedItems,
         selectedBackupDevice || undefined
       );
 
       if (response.success) {
+        console.log('✅ Selective backup created successfully');
+        
         // Poll for completion
         let progress = 0;
         const interval = setInterval(() => {
@@ -585,6 +729,8 @@ const BackUp: React.FC = () => {
           if (progress >= 100) {
             clearInterval(interval);
             setIsLoading(false);
+            
+            console.log('🔄 Refreshing backup data...');
             
             // Refresh backup list
             backupService.getBackupVersions().then(res => {
@@ -601,6 +747,8 @@ const BackUp: React.FC = () => {
                 }));
                 setBackupVersions(formattedBackups);
               }
+            }).catch(err => {
+              console.error('Error refreshing backup list:', err);
             });
 
             // Refresh health score
@@ -608,16 +756,34 @@ const BackUp: React.FC = () => {
               if (res.success) {
                 setHealthScore(res.health);
               }
+            }).catch(err => {
+              console.error('Error refreshing health score:', err);
             });
+
+            // Clear selection after successful backup
+            setSelectedItems({ passwordIds: [], documentIds: [], qrcodeIds: [] });
+            setSelectedBackupDevice('');
 
             setTimeout(() => setShowBackupModal(false), 2000);
           }
         }, 500);
       }
     } catch (err: any) {
-      console.error('Selective backup error:', err);
-      setError(err.response?.data?.message || 'Failed to create selective backup');
+      console.error('❌ Selective backup error:', err);
+      const errorMessage = err.response?.data?.message || 'Failed to create selective backup';
+      setError(errorMessage);
+      
+      // Handle backend validation errors
+      if (err.response?.data?.errors && Array.isArray(err.response.data.errors)) {
+        const errorMessages = err.response.data.errors.map((e: any) => e.message).join(', ');
+        alert(`⚠️ Validation errors: ${errorMessages}`);
+      } else {
+        alert(`❌ ${errorMessage}`);
+      }
+      
       setIsLoading(false);
+      setShowBackupModal(false);
+      setSyncProgress({ total: 0, current: 0, uploading: false });
     }
   };
 
@@ -1556,16 +1722,22 @@ const BackUp: React.FC = () => {
                 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Backup Retention Period
+                    Backup Retention Period <span className="text-red-500">*</span>
                   </label>
                   <div className="relative">
                     <select 
                       value={backupSettings.retention}
-                      onChange={(e) => setBackupSettings(prev => ({
-                        ...prev,
-                        retention: parseInt(e.target.value)
-                      }))}
-                      className="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50 pl-10"
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value);
+                        setBackupSettings(prev => ({
+                          ...prev,
+                          retention: value
+                        }));
+                        clearValidationError('retention');
+                      }}
+                      className={`w-full rounded-lg shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50 pl-10 ${
+                        validationErrors.retention ? 'border-red-500' : 'border-gray-300'
+                      }`}
                     >
                       <option value={7}>Keep for 7 days</option>
                       <option value={14}>Keep for 14 days</option>
@@ -1577,9 +1749,14 @@ const BackUp: React.FC = () => {
                       <FaClock className="text-gray-400" />
                     </div>
                   </div>
-                  <p className="mt-1.5 text-xs text-gray-500">
-                    Older backups will be automatically deleted to save space
-                  </p>
+                  {validationErrors.retention && (
+                    <ValidationError message={validationErrors.retention} />
+                  )}
+                  {!validationErrors.retention && (
+                    <p className="mt-1.5 text-xs text-gray-500">
+                      Older backups will be automatically deleted to save space
+                    </p>
+                  )}
                 </div>
                 
                 <div className="flex items-center justify-between p-4 rounded-xl bg-gradient-to-r from-purple-50 to-white border border-gray-100">
