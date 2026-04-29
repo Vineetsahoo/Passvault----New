@@ -25,10 +25,26 @@ interface Password {
   issuer?: string;
 }
 
+const resolvePassType = (category: string): Password['passType'] => {
+  switch (category) {
+    case 'finance':
+      return 'payment';
+    case 'identity':
+      return 'identity';
+    case 'license':
+      return 'license';
+    case 'document':
+      return 'document';
+    default:
+      return 'account';
+  }
+};
+
 const Passwords = () => {
   const [passwords, setPasswords] = useState<Password[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const [showPassword, setShowPassword] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -269,7 +285,7 @@ const Passwords = () => {
         notes: p.notes || '',
         passType: p.passType || 'account',
         expiryDate: p.expiresAt || p.expiryDate || undefined,
-        issuer: p.issuer || ''
+        issuer: p.website || p.issuer || ''
       }));
       setPasswords(mapped);
     } catch (err: any) {
@@ -347,6 +363,93 @@ const Passwords = () => {
     } catch (err) {
       console.error('Get password error', err);
       alert('Failed to retrieve password');
+    }
+  };
+
+  const handleSubmitPassword = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const formData = new FormData(event.currentTarget);
+    const payload = {
+      title: String(formData.get('title') || '').trim(),
+      username: String(formData.get('username') || '').trim(),
+      password: String(formData.get('password') || '').trim(),
+      category: String(formData.get('category') || 'other'),
+      website: String(formData.get('website') || '').trim(),
+      expiresAt: String(formData.get('expiryDate') || '').trim(),
+      notes: String(formData.get('notes') || '').trim(),
+    };
+
+    if (!payload.title || !payload.password) {
+      setError('Title and password are required');
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+
+    try {
+      if (selectedPassword) {
+        const response = await passwordAPI.updatePassword(selectedPassword.id, payload);
+        const updated = response?.data?.data?.password;
+        setPasswords(prev => prev.map(item => item.id === selectedPassword.id ? {
+          ...item,
+          title: updated?.title || payload.title,
+          username: updated?.username || payload.username,
+          category: updated?.category || payload.category,
+          notes: updated?.notes || payload.notes,
+          expiryDate: updated?.expiresAt || payload.expiresAt,
+          issuer: updated?.website || payload.website,
+          lastUpdated: updated?.updatedAt || new Date().toISOString(),
+          passType: resolvePassType(updated?.category || payload.category),
+        } : item));
+        await alertService.createAlert({
+          alertType: 'security_scan',
+          severity: 'low',
+          title: 'Credential updated',
+          message: `Credential "${payload.title}" was updated`,
+          relatedTo: 'password',
+          relatedId: selectedPassword.id,
+        });
+      } else {
+        const response = await passwordAPI.createPassword(payload);
+        const created = response?.data?.data?.password;
+        if (created) {
+          setPasswords(prev => [
+            {
+              id: created._id,
+              title: created.title,
+              username: created.username || payload.username,
+              password: '••••••••',
+              lastUpdated: created.updatedAt || created.createdAt || new Date().toISOString(),
+              category: created.category || payload.category,
+              strength: created.strength || 'medium',
+              notes: created.notes || payload.notes,
+              isFavorite: created.isFavorite,
+              passType: resolvePassType(created.category || payload.category),
+              expiryDate: created.expiresAt || payload.expiresAt || undefined,
+              issuer: created.website || payload.website,
+            },
+            ...prev,
+          ]);
+        }
+        await alertService.createAlert({
+          alertType: 'security_scan',
+          severity: 'low',
+          title: 'Credential created',
+          message: `Credential "${payload.title}" was added to your vault`,
+          relatedTo: 'password',
+          relatedId: created?._id,
+        });
+      }
+
+      setShowAddEditModal(false);
+      setSelectedPassword(null);
+      event.currentTarget.reset();
+    } catch (err: any) {
+      setError(err?.response?.data?.message || err.message || 'Failed to save credential');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -965,12 +1068,13 @@ const Passwords = () => {
               </div>
               
               <div className="p-6 overflow-y-auto max-h-[calc(85vh-80px)]">
-                <form className="space-y-5">
+                <form className="space-y-5" onSubmit={handleSubmitPassword}>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Title</label>
                     <input 
                       type="text" 
                       defaultValue={selectedPassword?.title}
+                      name="title"
                       className="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-300 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50 py-3" 
                     />
                   </div>
@@ -980,6 +1084,7 @@ const Passwords = () => {
                       <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
                       <select 
                         defaultValue={selectedPassword?.category}
+                        name="category"
                         className="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-300 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50"
                       >
                         <option value="finance">Finance</option>
@@ -993,6 +1098,7 @@ const Passwords = () => {
                       <label className="block text-sm font-medium text-gray-700 mb-2">Credential Type</label>
                       <select 
                         defaultValue={selectedPassword?.passType}
+                        name="passType"
                         className="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-300 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50"
                       >
                         <option value="account">Account</option>
@@ -1009,6 +1115,7 @@ const Passwords = () => {
                     <input 
                       type="text" 
                       defaultValue={selectedPassword?.issuer}
+                      name="website"
                       className="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-300 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50 py-3" 
                     />
                   </div>
@@ -1018,6 +1125,7 @@ const Passwords = () => {
                     <input 
                       type="text" 
                       defaultValue={selectedPassword?.username}
+                      name="username"
                       className="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-300 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50 py-3" 
                     />
                   </div>
@@ -1028,6 +1136,7 @@ const Passwords = () => {
                       <input 
                         type="password" 
                         defaultValue={selectedPassword?.password}
+                        name="password"
                         className="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-300 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50 py-3 pr-10" 
                       />
                       <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center">
@@ -1064,7 +1173,8 @@ const Passwords = () => {
                     <label className="block text-sm font-medium text-gray-700 mb-2">Expiry Date</label>
                     <input 
                       type="date" 
-                      defaultValue={selectedPassword?.expiryDate}
+                      defaultValue={selectedPassword?.expiryDate ? selectedPassword.expiryDate.split('T')[0] : ''}
+                      name="expiryDate"
                       className="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-300 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50" 
                     />
                   </div>
@@ -1073,6 +1183,7 @@ const Passwords = () => {
                     <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
                     <textarea 
                       defaultValue={selectedPassword?.notes}
+                      name="notes"
                       className="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-300 focus:ring-2 focus:ring-indigo-200 focus:ring-opacity-50" 
                       rows={3}
                     ></textarea>
@@ -1092,9 +1203,10 @@ const Passwords = () => {
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                       type="submit"
+                      disabled={saving}
                       className="px-5 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium shadow-sm"
                     >
-                      {selectedPassword ? 'Update' : 'Save'}
+                      {saving ? 'Saving...' : (selectedPassword ? 'Update' : 'Save')}
                     </motion.button>
                   </div>
                 </form>

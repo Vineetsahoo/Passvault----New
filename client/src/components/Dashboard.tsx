@@ -23,7 +23,7 @@ import {
   FaSave, FaPalette, FaEyeSlash, FaEye, FaToggleOn, FaToggleOff, FaInfoCircle
 } from 'react-icons/fa';
 import { FaSquarePollHorizontal, FaEllipsis } from 'react-icons/fa6';
-import { monitoringAPI, historyAPI, deviceAPI, backupAPI, sharingAPI } from '../services/api';
+import { monitoringAPI, historyAPI, deviceAPI, backupAPI, sharingAPI, passwordAPI } from '../services/api';
 
 interface SubMenuItem {
   label: string;
@@ -1911,9 +1911,11 @@ const Dashboard = () => {
         const parsedUserData = userData ? JSON.parse(userData) : {};
         
         // Fetch additional data in parallel
-        const [devicesResponse, sharingResponse] = await Promise.allSettled([
+        const [devicesResponse, sharingResponse, passwordStatsResponse, expiringPasswordsResponse] = await Promise.allSettled([
           deviceAPI.getDeviceStats().catch(() => null),
           sharingAPI.getStats().catch(() => null),
+          passwordAPI.getStats().catch(() => null),
+          passwordAPI.getExpiring(30).catch(() => null),
         ]);
         
         if (dashboardResponse.data?.data) {
@@ -1942,17 +1944,43 @@ const Dashboard = () => {
           if (sharingResponse.status === 'fulfilled' && sharingResponse.value?.data) {
             sharingStats = sharingResponse.value.data;
           }
+
+          // Get password stats from response
+          let passwordStats = {
+            total: totalPasswords,
+            strong: strongCount,
+            weak: apiData.security?.weakPasswords || Math.max(0, totalPasswords - strongCount),
+            medium: 0,
+            reused: apiData.security?.reusedPasswords || 0,
+            compromised: apiData.security?.breachedAccounts || 0,
+          };
+          if (passwordStatsResponse.status === 'fulfilled' && passwordStatsResponse.value?.data?.data?.overall) {
+            const overall = passwordStatsResponse.value.data.data.overall;
+            passwordStats = {
+              total: overall.total || passwordStats.total,
+              strong: (overall.strong || 0) + (overall.veryStrong || 0),
+              weak: overall.weak || passwordStats.weak,
+              medium: overall.medium || 0,
+              reused: apiData.security?.reusedPasswords || 0,
+              compromised: overall.compromised || passwordStats.compromised,
+            };
+          }
+
+          const passwordsExpiringSoon =
+            expiringPasswordsResponse.status === 'fulfilled' && expiringPasswordsResponse.value?.data?.data?.passwords
+              ? expiringPasswordsResponse.value.data.data.passwords.length
+              : apiData.security?.expiredPasswords || 0;
           
           setDashboardStats({
-            totalPasswords: totalPasswords,
-            strongPasswords: strongCount,
-            weakPasswords: apiData.security?.weakPasswords || Math.max(0, totalPasswords - strongCount),
-            reusedPasswords: apiData.security?.reusedPasswords || 0,
+            totalPasswords: passwordStats.total,
+            strongPasswords: passwordStats.strong,
+            weakPasswords: passwordStats.weak,
+            reusedPasswords: passwordStats.reused,
             securityScore: apiData.security?.score || apiData.overview?.securityScore || 0,
-            breachedAccounts: apiData.security?.breachedAccounts || 0,
+            breachedAccounts: passwordStats.compromised,
             lastBackup: apiData.backup?.lastBackup ? new Date(apiData.backup.lastBackup).toLocaleDateString() : 'Recently synced',
             profileCompletion: profileCompletion,
-            passwordsExpiringSoon: apiData.security?.expiredPasswords || 0,
+            passwordsExpiringSoon: passwordsExpiringSoon,
             lastPasswordChange: apiData.security?.lastPasswordChange ? new Date(apiData.security.lastPasswordChange).toLocaleDateString() : 'Never',
             securityIncidents: apiData.alerts?.length || 0,
             masterPasswordStrength: parsedUserData.masterPassword ? 92 : 0,
